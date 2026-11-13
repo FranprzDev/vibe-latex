@@ -36,7 +36,7 @@ Podés usar el plugin sin clave ni costos con servidores locales compatibles con
 1. Instalá [Ollama](https://ollama.com) (Windows, Mac o Linux) y descargá el modelo de conversión:
 
    ```bash
-   ollama pull qwen2.5:7b
+   ollama pull qwen3.5:9b
    ```
 
 2. Elegí un servidor de transcripción de voz:
@@ -45,8 +45,10 @@ Podés usar el plugin sin clave ni costos con servidores locales compatibles con
 
       ```bash
       pip install faster-whisper fastapi uvicorn python-multipart
-      python scripts/local_stt.py
+      python scripts/local_stt.py --port 8000
       ```
+
+      El puerto es configurable con `--port` (por ejemplo, `--port 10000`); la **URL de transcripción** del plugin debe usar el mismo puerto.
 
    b. Con Docker: usá [Speaches](https://github.com/speaches-ai/speaches):
 
@@ -54,9 +56,9 @@ Podés usar el plugin sin clave ni costos con servidores locales compatibles con
       docker run -p 8000:8000 ghcr.io/speaches-ai/speaches:latest-cpu
       ```
 
-3. En **Ajustes → Vibe LaTeX**, presioná el botón rápido **Local gratis**. Alternativamente, configurá **URL de transcripción** en `http://localhost:8000/v1` y **URL de conversión** en `http://localhost:11434/v1`, dejá la clave API vacía, usá el modelo de transcripción `Systran/faster-whisper-small` y el modelo de conversión `qwen2.5:7b`.
+3. En **Ajustes → Vibe LaTeX**, presioná el botón rápido **Local gratis**. Alternativamente, configurá **URL de transcripción** en `http://localhost:8000/v1` y **URL de conversión** en `http://localhost:11434/v1`, dejá la clave API vacía, usá el modelo de transcripción `Systran/faster-whisper-small` y el modelo de conversión `qwen3.5:9b`.
 
-La calidad de conversión con modelos locales de 7B es inferior a la de OpenAI. Si tenés una GPU de 8 GB o más, un modelo más grande como `qwen2.5:14b` produce mejor LaTeX matemático en español.
+La calidad de conversión con modelos locales es inferior a la de OpenAI. El modelo de conversión recomendado es `qwen3.5:9b`, que entra en una GPU de 8 GB. Para transcribir se mantiene `small` de faster-whisper, con `medium` como opción para mejor precisión si tenés GPU de sobra.
 
 ## Configuración
 

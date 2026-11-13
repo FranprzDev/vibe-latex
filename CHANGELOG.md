@@ -4,6 +4,14 @@ Todos los cambios relevantes de Vibe LaTeX se documentan acá. El formato sigue
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el versionado es
 [SemVer](https://semver.org/lang/es/).
 
+## [0.4.1] - 2026-11-12
+
+### Agregado
+- `scripts/local_stt.py` acepta `--port` para elegir el puerto.
+
+### Cambiado
+- El botón **Local gratis** y la guía usan `qwen3.5:9b` como modelo de conversión recomendado.
+
 ## [0.4.0] - 2026-11-12
 
 ### Agregado
