@@ -3,7 +3,6 @@ export interface CaptureOptions {
 	/** End the phrase after this much silence once speech was heard. */
 	silenceMs?: number;
 	/** Max phrase length. */
-	maxMs?: number;
 	/** Give up if no speech at all for this long. */
 	graceMs?: number;
 }
@@ -79,12 +78,11 @@ export class AudioRecorder {
 
 	/**
 	 * Record one phrase: starts the mic, ends when the speaker pauses
-	 * (~silenceMs of low volume after speech), hits maxMs, or opts.signal
+	 * (~silenceMs of low volume after speech) or opts.signal
 	 * aborts. Returns null if nothing was heard before graceMs.
 	 */
 	async capturePhrase(opts: CaptureOptions = {}): Promise<Blob | null> {
 		const silenceMs = opts.silenceMs ?? 2800;
-		const maxMs = opts.maxMs ?? 60_000;
 		const graceMs = opts.graceMs ?? 10_000;
 
 		await this.start();
@@ -134,7 +132,6 @@ export class AudioRecorder {
 				}
 
 				if (opts.signal?.aborted) return finish(true);
-				if (now - start > maxMs) return finish(true);
 				if (heardSpeech && silenceStart && now - silenceStart > silenceMs)
 					return finish(true);
 				if (!heardSpeech && now - start > graceMs) return finish(false);

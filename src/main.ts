@@ -280,7 +280,6 @@ export default class LatexVoicePlugin extends Plugin {
 				const blob = await this.recorder.capturePhrase({
 					signal,
 					silenceMs: this.settings.silenceMs,
-					maxMs: this.settings.maxPhraseMs,
 					graceMs: this.settings.graceMs,
 				});
 				if (!blob || blob.size < 800) continue;
@@ -1116,23 +1115,6 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 					const secs = Number(v);
 					if (!Number.isFinite(secs)) return;
 					s.silenceMs = clampDuration(secs * 1000, DEFAULT_SETTINGS.silenceMs, 500, 10_000);
-					await this.plugin.saveSettings();
-				});
-			});
-
-		new Setting(container)
-			.setName("Duración máxima de la frase (s)")
-			.setDesc("Corta una frase que se extiende demasiado.")
-			.addText((t) => {
-				t.inputEl.type = "number";
-				t.inputEl.min = "5";
-				t.inputEl.max = "300";
-				t.inputEl.step = "5";
-				t.setValue(String(s.maxPhraseMs / 1000));
-				t.onChange(async (v) => {
-					const secs = Number(v);
-					if (!Number.isFinite(secs)) return;
-					s.maxPhraseMs = clampDuration(secs * 1000, DEFAULT_SETTINGS.maxPhraseMs, 5_000, 300_000);
 					await this.plugin.saveSettings();
 				});
 			});

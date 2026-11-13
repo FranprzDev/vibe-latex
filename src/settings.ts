@@ -78,7 +78,6 @@ export interface LatexVoiceSettings {
 	/** Silence after speech that ends a phrase, in milliseconds. */
 	silenceMs: number;
 	/** Hard cap for a single phrase, in milliseconds. */
-	maxPhraseMs: number;
 	/** Give up when no speech was heard for this long, in milliseconds. */
 	graceMs: number;
 	sttPort: number;
@@ -119,7 +118,6 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	saveAudio: false,
 	audioFolder: "recordings",
 	silenceMs: 2800,
-	maxPhraseMs: 60_000,
 	graceMs: 10_000,
 	sttPort: 10000,
 	llmPort: 8082,
@@ -184,6 +182,7 @@ export function migrateSettings(
 	const data = { ...(raw ?? {}) };
 	delete data.language;
 	delete data.glossary;
+	delete data.maxPhraseMs;
 
 	if (data.sttPort === 8081) data.sttPort = DEFAULT_SETTINGS.sttPort;
 	if (data.transcriptionBaseUrl === "http://127.0.0.1:8081")
@@ -231,7 +230,6 @@ export function migrateSettings(
 	if (!isPreviousRemoteSettings(settings.previousRemoteSettings))
 		settings.previousRemoteSettings = null;
 	settings.silenceMs = clampDuration(settings.silenceMs, DEFAULT_SETTINGS.silenceMs, 500, 10_000);
-	settings.maxPhraseMs = clampDuration(settings.maxPhraseMs, DEFAULT_SETTINGS.maxPhraseMs, 5_000, 300_000);
 	settings.graceMs = clampDuration(settings.graceMs, DEFAULT_SETTINGS.graceMs, 1_000, 60_000);
 	settings.sttPort = clampDuration(settings.sttPort, DEFAULT_SETTINGS.sttPort, 1024, 65_535);
 	settings.llmPort = clampDuration(settings.llmPort, DEFAULT_SETTINGS.llmPort, 1024, 65_535);
