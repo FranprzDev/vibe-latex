@@ -165,6 +165,19 @@ export default class LatexVoicePlugin extends Plugin {
 		this.sessionAbort = new AbortController();
 		const signal = this.sessionAbort.signal;
 		const provider = createProvider(this.settings);
+
+		if (this.settings.providerId === "local") {
+			const ready = await this.localManager.ready();
+			if (!ready.stt || !ready.llm) {
+				new Notice(ready.stt
+					? "El servidor de conversión no responde. Esperá a que termine la instalación o reiniciá el modo local en Ajustes."
+					: "El servidor de voz no responde. Esperá a que termine la instalación o reiniciá el modo local en Ajustes.");
+				this.sessionAbort = null;
+				this.updateStatus("");
+				return;
+			}
+		}
+
 		this.updateStatus(replaceTarget ? "corrigiendo..." : "escuchando...");
 		new Notice(replaceTarget
 			? "Decí de nuevo la frase completa que querés corregir."
@@ -190,6 +203,8 @@ export default class LatexVoicePlugin extends Plugin {
 						{
 							audioSeconds: this.recorder.lastDurationSeconds,
 							signal,
+							onStep: (step) =>
+								this.updateStatus(step === "transcribing" ? "transcribiendo..." : "convirtiendo..."),
 						},
 					);
 					await this.recordUsage(usage);

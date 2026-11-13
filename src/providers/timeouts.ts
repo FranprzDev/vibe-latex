@@ -1,0 +1,2 @@
+export const TRANSCRIBE_TIMEOUT_MS = 120_000;
+export const CONVERT_TIMEOUT_MS = 180_000;

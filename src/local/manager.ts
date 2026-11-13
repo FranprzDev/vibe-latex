@@ -3,6 +3,7 @@ import type { ChildProcess } from "child_process";
 import { createHash } from "crypto";
 import { get as httpGet } from "http";
 import { get as httpsGet } from "https";
+import { Notice } from "obsidian";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -49,25 +50,25 @@ export interface LocalAssets {
 }
 
 const STT_WINDOWS_X64: Asset = {
-	url: "https://github.com/FranprzDev/vibe-latex/releases/download/stt-v1.9.5/vibe-stt-server-windows-x64.zip",
+	url: "https://github.com/FranprzDev/vibe-stt-server/releases/download/stt-v1.9.5/vibe-stt-server-windows-x64.zip",
 	fileName: "vibe-stt-server-windows-x64.zip",
 	sha256: "6ae141da58e7599df38273a72b6e5904f35424a34a7224ef311cdec388b9d270",
 };
 
 const STT_MACOS_ARM64: Asset = {
-	url: "https://github.com/FranprzDev/vibe-latex/releases/download/stt-v1.9.5/vibe-stt-server-macos-arm64.tar.gz",
+	url: "https://github.com/FranprzDev/vibe-stt-server/releases/download/stt-v1.9.5/vibe-stt-server-macos-arm64.tar.gz",
 	fileName: "vibe-stt-server-macos-arm64.tar.gz",
 	sha256: "611181cf253209d633691a08a182b6b93b4ce9d8444509e4b53ab6f1a7468232",
 };
 
 const STT_MACOS_X64: Asset = {
-	url: "https://github.com/FranprzDev/vibe-latex/releases/download/stt-v1.9.5/vibe-stt-server-macos-x64.tar.gz",
+	url: "https://github.com/FranprzDev/vibe-stt-server/releases/download/stt-v1.9.5/vibe-stt-server-macos-x64.tar.gz",
 	fileName: "vibe-stt-server-macos-x64.tar.gz",
 	sha256: "d01e1b62ad589b50d4f3cbeffb6e49e586f00516e1660d9e3dcc7a82b6ca45c8",
 };
 
 const STT_LINUX_X64: Asset = {
-	url: "https://github.com/FranprzDev/vibe-latex/releases/download/stt-v1.9.5/vibe-stt-server-linux-x64.tar.gz",
+	url: "https://github.com/FranprzDev/vibe-stt-server/releases/download/stt-v1.9.5/vibe-stt-server-linux-x64.tar.gz",
 	fileName: "vibe-stt-server-linux-x64.tar.gz",
 	sha256: "f5d1291b27792fdd396b92b03e9d0c399e01cfdf1af78cc2bac64dbdc868ba62",
 };
@@ -231,6 +232,7 @@ export class LocalModeManager {
 	private sttDir: string;
 	private llamaDir: string;
 	private modelsDir: string;
+	private logsDir: string;
 
 	constructor(options: LocalModeManagerOptions) {
 		this.sttPort = options.sttPort;
@@ -240,6 +242,7 @@ export class LocalModeManager {
 		this.sttDir = path.join(this.localRoot, "bin", "stt");
 		this.llamaDir = path.join(this.localRoot, "bin", "llama");
 		this.modelsDir = path.join(this.localRoot, "models");
+		this.logsDir = path.join(this.localRoot, "logs");
 	}
 
 	private isAlive(child: ChildProcess | null): boolean {
@@ -405,17 +408,36 @@ export class LocalModeManager {
 		await fs.promises.rm(tmpDir, { recursive: true, force: true });
 	}
 
+	private get sttHealthUrl(): string {
+		return `http://127.0.0.1:${this.sttPort}/`;
+	}
+
+	private get llmHealthUrl(): string {
+		return `http://127.0.0.1:${this.llmPort}/health`;
+	}
+
+	private async ping(url: string, requireOk: boolean): Promise<boolean> {
+		try {
+			const res = await fetch(url, { signal: AbortSignal.timeout(3_000) });
+			return requireOk ? res.status === 200 : true;
+		} catch {
+			return false;
+		}
+	}
+
+	async ready(): Promise<{ stt: boolean; llm: boolean }> {
+		const [stt, llm] = await Promise.all([
+			this.ping(this.sttHealthUrl, false),
+			this.ping(this.llmHealthUrl, true),
+		]);
+		return { stt, llm };
+	}
+
 	private async waitForStt(): Promise<void> {
 		const deadline = Date.now() + 90_000;
 		while (Date.now() < deadline) {
-			try {
-				await fetch(`http://127.0.0.1:${this.sttPort}/`, {
-					signal: AbortSignal.timeout(3_000),
-				});
-				return;
-			} catch {
-				await delay(1_000);
-			}
+			if (await this.ping(this.sttHealthUrl, false)) return;
+			await delay(1_000);
 		}
 		throw new Error("whisper.cpp no respondió a tiempo.");
 	}
@@ -423,15 +445,35 @@ export class LocalModeManager {
 	private async waitForLlm(): Promise<void> {
 		const deadline = Date.now() + 180_000;
 		while (Date.now() < deadline) {
-			try {
-				const res = await fetch(`http://127.0.0.1:${this.llmPort}/health`, {
-					signal: AbortSignal.timeout(3_000),
-				});
-				if (res.status === 200) return;
-			} catch {}
+			if (await this.ping(this.llmHealthUrl, true)) return;
 			await delay(2_000);
 		}
 		throw new Error("llama-server no respondió a tiempo.");
+	}
+
+	private logPath(server: "stt" | "llm"): string {
+		return path.join(this.logsDir, server === "stt" ? "stt-server.log" : "llama-server.log");
+	}
+
+	private spawnServer(server: "stt" | "llm", bin: string, args: string[]): ChildProcess {
+		const logPath = this.logPath(server);
+		const logStream = fs.createWriteStream(logPath, { flags: "a" });
+		const child = spawn(bin, args, {
+			detached: false,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		child.stdout?.pipe(logStream, { end: false });
+		child.stderr?.pipe(logStream, { end: false });
+		child.on("exit", () => {
+			logStream.end();
+			const tracked = server === "stt" ? this.sttProcess : this.llmProcess;
+			if (tracked !== child) return;
+			if (server === "stt") this.sttProcess = null;
+			else this.llmProcess = null;
+			const label = server === "stt" ? "servidor de voz" : "servidor de conversión";
+			new Notice(`Vibe LaTeX: el ${label} se detuvo. Revisá el registro: ${logPath}`);
+		});
+		return child;
 	}
 
 	async start(): Promise<void> {
@@ -445,34 +487,32 @@ export class LocalModeManager {
 		const whisperModelPath = path.join(this.modelsDir, WHISPER_MODEL.fileName);
 		const llmModelPath = path.join(this.modelsDir, LLM_MODEL.fileName);
 
+		await fs.promises.mkdir(this.logsDir, { recursive: true });
+
 		const started: ChildProcess[] = [];
 		try {
 			if (!this.isAlive(this.sttProcess)) {
-				const child = spawn(
+				const child = this.spawnServer(
+					"stt",
 					sttBin,
 					buildSttArgs(whisperModelPath, this.sttPort),
-					{ detached: false, stdio: "ignore" },
 				);
-				child.on("exit", () => {
-					if (this.sttProcess === child) this.sttProcess = null;
-				});
 				this.sttProcess = child;
 				started.push(child);
 			}
 			if (!this.isAlive(this.llmProcess)) {
-				const child = spawn(
+				const child = this.spawnServer(
+					"llm",
 					llamaBin,
 					buildLlamaArgs(llmModelPath, this.llmPort, this.llmApiKey),
-					{ detached: false, stdio: "ignore" },
 				);
-				child.on("exit", () => {
-					if (this.llmProcess === child) this.llmProcess = null;
-				});
 				this.llmProcess = child;
 				started.push(child);
 			}
 			await Promise.all([this.waitForStt(), this.waitForLlm()]);
 		} catch (error) {
+			if (this.sttProcess && started.includes(this.sttProcess)) this.sttProcess = null;
+			if (this.llmProcess && started.includes(this.llmProcess)) this.llmProcess = null;
 			for (const child of started) child.kill("SIGKILL");
 			throw error;
 		}

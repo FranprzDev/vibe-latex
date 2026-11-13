@@ -83,4 +83,23 @@ describe("dictatePipeline", () => {
 		});
 		expect(usage.audioSeconds).toBe(7);
 	});
+
+	it("reports each stage through onStep before it runs", async () => {
+		const seen: string[] = [];
+		const p: VoiceProvider = {
+			...fakeProvider,
+			transcribe: async () => {
+				seen.push("transcribe");
+				return { text: "t" };
+			},
+			convertToLatex: async () => {
+				seen.push("convert");
+				return { text: "c" };
+			},
+		};
+		await dictatePipeline(p, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS, {
+			onStep: (step) => seen.push(step),
+		});
+		expect(seen).toEqual(["transcribing", "transcribe", "converting", "convert"]);
+	});
 });

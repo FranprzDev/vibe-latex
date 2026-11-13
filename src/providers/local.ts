@@ -7,6 +7,7 @@ import {
 } from "./provider";
 import { anySignal } from "../abort";
 import { blobToWav, isWav } from "../local/wav";
+import { CONVERT_TIMEOUT_MS, TRANSCRIBE_TIMEOUT_MS } from "./timeouts";
 
 export interface LocalProviderConfig {
 	transcriptionBaseUrl: string;
@@ -62,7 +63,7 @@ export class LocalProvider implements VoiceProvider {
 			method: "POST",
 			headers: this.authHeaders(),
 			body: form,
-			signal: anySignal([AbortSignal.timeout(60_000), opts.signal]),
+			signal: anySignal([AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS), opts.signal]),
 		});
 
 		const data = (await res.json()) as TranscriptionResponse;
@@ -83,7 +84,7 @@ export class LocalProvider implements VoiceProvider {
 					{ role: "user", content: transcript },
 				],
 			}),
-			signal: anySignal([AbortSignal.timeout(60_000), opts.signal]),
+			signal: anySignal([AbortSignal.timeout(CONVERT_TIMEOUT_MS), opts.signal]),
 		});
 
 		const data = (await res.json()) as ChatResponse;
