@@ -181,6 +181,8 @@ export function cleanVisionLatex(raw: string): string | null {
 	let text = raw.trim();
 	const fence = text.match(/```(?:latex|tex)?\s*([\s\S]*?)```/i);
 	if (fence) text = fence[1].trim();
+	const doc = text.match(/\\begin\{document\}([\s\S]*?)\\end\{document\}/i);
+	if (doc) text = doc[1].trim();
 	for (const prefix of VISION_PREFIXES) text = text.replace(prefix, "");
 	text = text.trim();
 	if (!text) return null;

@@ -345,4 +345,10 @@ describe("cleanVisionLatex", () => {
 	it("returns null for empty and meta responses", () => {
 		expect(cleanVisionLatex("   ")).toBeNull();
 	});
+
+	it("unwraps a full latex document down to its body", () => {
+		expect(
+			cleanVisionLatex("\\documentclass{article}\n\\begin{document}\n\\frac{a}{b}\n\\end{document}"),
+		).toBe("\\frac{a}{b}");
+	});
 });
