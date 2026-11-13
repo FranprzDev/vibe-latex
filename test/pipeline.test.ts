@@ -3,6 +3,8 @@ import { dictatePipeline } from "../src/pipeline";
 import { VoiceProvider } from "../src/providers";
 import { DEFAULT_SETTINGS } from "../src/settings";
 
+const CONVERT_SETTINGS = { ...DEFAULT_SETTINGS, alwaysConvert: true };
+
 const fakeProvider: VoiceProvider = {
 	id: "fake",
 	displayName: "Fake",
@@ -23,7 +25,7 @@ describe("dictatePipeline", () => {
 			fakeProvider,
 			new Blob(["a"]),
 			"d.m4a",
-			DEFAULT_SETTINGS,
+			CONVERT_SETTINGS,
 		);
 		expect(transcript).toBe("transcribed d.m4a");
 		expect(output).toBe("converted: transcribed d.m4a");
@@ -82,7 +84,7 @@ describe("dictatePipeline", () => {
 			...fakeProvider,
 			convertToLatex: async () => ({ text: "1. El primero es la respuesta de estado cero\n2. El segundo es la respuesta de entrada cero" }),
 		};
-		const { output } = await dictatePipeline(listProvider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		const { output } = await dictatePipeline(listProvider, new Blob(["a"]), "d.m4a", CONVERT_SETTINGS);
 		expect(output).toBe("1) El primero es la respuesta de estado cero\n2) El segundo es la respuesta de entrada cero");
 	});
 
@@ -91,7 +93,7 @@ describe("dictatePipeline", () => {
 			...fakeProvider,
 			convertToLatex: async () => ({ text: "1. Introducción" }),
 		};
-		const { output } = await dictatePipeline(singleProvider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		const { output } = await dictatePipeline(singleProvider, new Blob(["a"]), "d.m4a", CONVERT_SETTINGS);
 		expect(output).toBe("1. Introducción");
 	});
 
@@ -109,7 +111,7 @@ describe("dictatePipeline", () => {
 				return { text: "c" };
 			},
 		};
-		await dictatePipeline(p, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS, {
+		await dictatePipeline(p, new Blob(["a"]), "d.m4a", CONVERT_SETTINGS, {
 			signal: controller.signal,
 		});
 		expect(seen).toEqual([controller.signal, controller.signal]);
@@ -121,7 +123,7 @@ describe("dictatePipeline", () => {
 			transcribe: async () => ({ text: "t" }),
 			convertToLatex: async () => ({ text: "c" }),
 		};
-		const { usage } = await dictatePipeline(p, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS, {
+		const { usage } = await dictatePipeline(p, new Blob(["a"]), "d.m4a", CONVERT_SETTINGS, {
 			audioSeconds: 7,
 		});
 		expect(usage.audioSeconds).toBe(7);
@@ -141,7 +143,7 @@ describe("dictatePipeline", () => {
 			},
 		};
 		let got: string | undefined;
-		await dictatePipeline(p, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS, {
+		await dictatePipeline(p, new Blob(["a"]), "d.m4a", CONVERT_SETTINGS, {
 			onTranscript: (transcript) => {
 				got = transcript;
 				seen.push("transcript");
@@ -160,7 +162,7 @@ describe("dictatePipeline", () => {
 		};
 		const onTranscript = vi.fn();
 		await expect(
-			dictatePipeline(failing, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS, { onTranscript }),
+			dictatePipeline(failing, new Blob(["a"]), "d.m4a", CONVERT_SETTINGS, { onTranscript }),
 		).rejects.toThrow("mic dead");
 		expect(onTranscript).not.toHaveBeenCalled();
 	});
@@ -178,7 +180,7 @@ describe("dictatePipeline", () => {
 				return { text: "c" };
 			},
 		};
-		await dictatePipeline(p, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS, {
+		await dictatePipeline(p, new Blob(["a"]), "d.m4a", CONVERT_SETTINGS, {
 			onStep: (step) => seen.push(step),
 		});
 		expect(seen).toEqual(["transcribing", "transcribe", "converting", "convert"]);
@@ -198,7 +200,7 @@ describe("0.5.10 guards", () => {
 				return fakeProvider.convertToLatex(t, o);
 			},
 		};
-		const { output } = await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		const { output } = await dictatePipeline(provider, new Blob(["a"]), "d.m4a", CONVERT_SETTINGS);
 		expect(output).toBe("## ");
 		expect(converted).toBe(false);
 	});
@@ -215,7 +217,7 @@ describe("0.5.10 guards", () => {
 				return fakeProvider.convertToLatex(t, o);
 			},
 		};
-		await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		await dictatePipeline(provider, new Blob(["a"]), "d.m4a", CONVERT_SETTINGS);
 		expect(seen).toBe("sea bastante difícil");
 	});
 
@@ -229,7 +231,7 @@ describe("0.5.10 guards", () => {
 				return { text: "No se ha dictado ninguna expresión matemática." };
 			},
 		};
-		const { output } = await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		const { output } = await dictatePipeline(provider, new Blob(["a"]), "d.m4a", CONVERT_SETTINGS);
 		expect(output).toBe("ruido ambiente");
 	});
 });
@@ -244,7 +246,7 @@ describe("convertImageToLatex", () => {
 		}));
 		try {
 			const out = await convertImageToLatex("aGVsbG8=", {
-				...DEFAULT_SETTINGS,
+				...CONVERT_SETTINGS,
 				improveEnabled: true,
 			});
 			expect(out).toBe("$$P(s)$$");
@@ -259,9 +261,74 @@ describe("convertImageToLatex", () => {
 		expect(await convertImageToLatex("aGVsbG8=", DEFAULT_SETTINGS)).toBeNull();
 		vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("down"); }));
 		try {
-			expect(await convertImageToLatex("aGVsbG8=", { ...DEFAULT_SETTINGS, improveEnabled: true })).toBeNull();
+			expect(await convertImageToLatex("aGVsbG8=", { ...CONVERT_SETTINGS, improveEnabled: true })).toBeNull();
 		} finally {
 			vi.unstubAllGlobals();
 		}
+	});
+});
+
+describe("conversion speed", () => {
+	it("skips the model for plain prose without math or format", async () => {
+		let converted = false;
+		const provider: VoiceProvider = {
+			...fakeProvider,
+			async transcribe() {
+				return { text: "esta noche tengo que estudiar para el parcial", durationSeconds: 1 };
+			},
+			async convertToLatex(t, o) {
+				converted = true;
+				return fakeProvider.convertToLatex(t, o);
+			},
+		};
+		const { output } = await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		expect(output).toBe("esta noche tengo que estudiar para el parcial");
+		expect(converted).toBe(false);
+	});
+
+	it("still converts math, format words, digits and paragraph markers", async () => {
+		const { needsConversion } = await import("../src/pipeline");
+		expect(needsConversion("integral de equis al cuadrado")).toBe(true);
+		expect(needsConversion("esto es un subtitulo")).toBe(true);
+		expect(needsConversion("son las 3 de la mañana")).toBe(true);
+		expect(needsConversion("primer paso barra barra segundo paso")).toBe(false);
+		expect(needsConversion("a // b")).toBe(true);
+		expect(needsConversion("el criterio de estabilidad del sistema")).toBe(false);
+	});
+
+	it("honors alwaysConvert to force the model on prose", async () => {
+		let converted = false;
+		const provider: VoiceProvider = {
+			...fakeProvider,
+			async transcribe() {
+				return { text: "esta noche tengo que estudiar", durationSeconds: 1 };
+			},
+			async convertToLatex(t, o) {
+				converted = true;
+				return fakeProvider.convertToLatex(t, o);
+			},
+		};
+		await dictatePipeline(provider, new Blob(["a"]), "d.m4a", { ...DEFAULT_SETTINGS, alwaysConvert: true });
+		expect(converted).toBe(true);
+	});
+
+	it("caps max_tokens from the transcript length", async () => {
+		const { conversionMaxTokens } = await import("../src/pipeline");
+		expect(conversionMaxTokens("hola")).toBe(128);
+		expect(conversionMaxTokens("x".repeat(200))).toBe(400);
+		expect(conversionMaxTokens("x".repeat(5000))).toBe(1024);
+		let seen = 0;
+		const provider: VoiceProvider = {
+			...fakeProvider,
+			async transcribe() {
+				return { text: "integral de equis", durationSeconds: 1 };
+			},
+			async convertToLatex(t, o) {
+				seen = o.maxTokens ?? 0;
+				return fakeProvider.convertToLatex(t, o);
+			},
+		};
+		await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		expect(seen).toBe(128);
 	});
 });

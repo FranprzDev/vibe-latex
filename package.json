@@ -1,6 +1,6 @@
 {
 	"name": "vibe-latex",
-	"version": "0.5.12",
+	"version": "0.5.13",
 	"description": "Dictate Spanish equations by voice and convert them into Markdown and LaTeX.",
 	"main": "main.js",
 	"scripts": {

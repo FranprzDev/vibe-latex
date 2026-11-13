@@ -162,6 +162,8 @@ export function buildLlamaArgs(modelPath: string, port: number, apiKey: string):
 		"--port", String(port),
 		"--api-key", apiKey,
 		"-c", "4096",
+		"-ngl", "99",
+		"--flash-attn",
 	];
 }
 

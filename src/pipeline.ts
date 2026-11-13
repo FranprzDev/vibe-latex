@@ -16,11 +16,23 @@ export interface PipelineResult {
 	};
 }
 
+const MATH_OR_FORMAT =
+	/\b(\d|integral|derivada|límite|limite|sumatoria|productoria|raíz|raiz|fracción|fraccion|exponente|logaritmo|seno|coseno|tangente|matriz|matrices|determinante|ecuación|ecuacion|polinomio|transformada|laplace|fourier|nyquist|bode|routh|hurwitz|transferencia|polo|polos|ceros?|sigma|delta|theta|omega|lambda|infinito|tiende a|subíndice|subindice|al cuadrado|al cubo|elevado|inversa|numerador|denominador|título|titulo|subtítulo|subtitulo|lista|negrita|cursiva|código|codigo|cita|gráfico|grafico)\b|\/\//i;
+
+export function needsConversion(text: string): boolean {
+	return MATH_OR_FORMAT.test(text);
+}
+
+export function conversionMaxTokens(text: string): number {
+	return Math.min(1024, Math.max(128, text.length * 2));
+}
+
 export interface PipelineOptions {
 	audioSeconds?: number;
 	signal?: AbortSignal;
 	onStep?: (step: "transcribing" | "converting") => void;
 	onTranscript?: (transcript: string) => void;
+	onToken?: (accumulated: string) => void;
 }
 
 
@@ -95,10 +107,19 @@ export async function dictatePipeline(
 		};
 	}
 	opts.onTranscript?.(transcript);
+	if (!settings.alwaysConvert && !needsConversion(transcript)) {
+		return {
+			transcript,
+			output: transcript,
+			usage: { audioSeconds: t.durationSeconds ?? opts.audioSeconds },
+		};
+	}
 	opts.onStep?.("converting");
 	const c = await provider.convertToLatex(transcript, {
 		systemPrompt: settings.conversionPrompt,
 		signal: opts.signal,
+		maxTokens: conversionMaxTokens(transcript),
+		onToken: opts.onToken,
 	});
 	// "//" is the spoken paragraph-break marker.
 	const converted = c.text.replace(/\s*\/\/\s*/g, "\n\n").trim();

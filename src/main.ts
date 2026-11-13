@@ -18,6 +18,7 @@ import { createProvider } from "./providers";
 import { convertImageToLatex, convertPlainText, dictatePipeline } from "./pipeline";
 import { cleanPdfText, trailingEllipsisLength } from "./text-clean";
 import { friendlyError } from "./errors";
+import { anySignal } from "./abort";
 import { INSTALL_STEPS, InstallProgress, LocalModeManager, LocalStatus } from "./local/manager";
 import {
 	clampDuration,
@@ -34,6 +35,7 @@ export default class LatexVoicePlugin extends Plugin {
 	private recorder = new AudioRecorder();
 	private statusBarEl!: HTMLElement;
 	private sessionAbort: AbortController | null = null;
+	private phraseAbort: AbortController | null = null;
 	private pendingSave: Promise<void> = Promise.resolve();
 
 	async onload() {
@@ -99,6 +101,11 @@ export default class LatexVoicePlugin extends Plugin {
 			id: "paste-clipboard-as-latex",
 			name: "Pegar el portapapeles como LaTeX",
 			editorCallback: (editor) => void this.pasteClipboardAsLatex(editor),
+		});
+		this.addCommand({
+			id: "finish-phrase-now",
+			name: "Terminar la frase y convertir ahora",
+			callback: () => this.phraseAbort?.abort(),
 		});
 
 		this.addSettingTab(new LatexVoiceSettingTab(this.app, this));
@@ -277,11 +284,13 @@ export default class LatexVoicePlugin extends Plugin {
 
 		try {
 			while (!signal.aborted) {
+				this.phraseAbort = new AbortController();
 				const blob = await this.recorder.capturePhrase({
-					signal,
+					signal: anySignal([signal, this.phraseAbort.signal]),
 					silenceMs: this.settings.silenceMs,
 					graceMs: this.settings.graceMs,
 				});
+				this.phraseAbort = null;
 				if (!blob || blob.size < 800) continue;
 
 				this.updateStatus("procesando...");
@@ -314,6 +323,28 @@ export default class LatexVoicePlugin extends Plugin {
 										to: from + transcript.length,
 										text: transcript,
 									};
+								}
+								: undefined,
+							onToken: useStreaming
+								? (accumulated) => {
+									const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+									const activeFile = this.app.workspace.getActiveFile();
+									const r = streaming.range;
+									if (!activeView || !activeFile || !r || activeFile.path !== r.filePath) return;
+									const activeEditor = activeView.editor;
+									if (activeEditor.getValue().slice(r.from, r.to) !== r.text) return;
+									activeEditor.replaceRange(
+										accumulated,
+										activeEditor.offsetToPos(r.from),
+										activeEditor.offsetToPos(r.to),
+									);
+									streaming.range = {
+										filePath: r.filePath,
+										from: r.from,
+										to: r.from + accumulated.length,
+										text: accumulated,
+									};
+									activeEditor.setCursor(activeEditor.offsetToPos(r.from + accumulated.length));
 								}
 								: undefined,
 						},
@@ -1064,6 +1095,18 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 			.addToggle((t) =>
 				t.setValue(s.improveEnabled).onChange(async (v) => {
 					s.improveEnabled = v;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(container)
+			.setName("Convertir siempre con el modelo")
+			.setDesc(
+				"Apagado (recomendado): el texto sin matemática ni formato se inserta directo, sin esperar al modelo.",
+			)
+			.addToggle((t) =>
+				t.setValue(s.alwaysConvert).onChange(async (v) => {
+					s.alwaysConvert = v;
 					await this.plugin.saveSettings();
 				}),
 			);

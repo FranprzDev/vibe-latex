@@ -7,6 +7,8 @@ export interface TranscribeOptions {
 export interface ConvertOptions {
 	systemPrompt: string;
 	signal?: AbortSignal;
+	maxTokens?: number;
+	onToken?: (accumulated: string) => void;
 }
 
 /**
