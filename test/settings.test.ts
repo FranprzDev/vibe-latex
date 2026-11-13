@@ -199,7 +199,7 @@ describe("0.5.10 migrations", () => {
 		const { migrateSettings, DEFAULT_SETTINGS } = await import("../src/settings");
 		const s = migrateSettings({ conversionPrompt: "mi prompt custom" });
 		expect(s.conversionPrompt).toBe("mi prompt custom");
-		expect(s.glossary.length).toBeGreaterThan(0);
+		expect("glossary" in s).toBe(false);
 		expect(s.improveEnabled).toBe(false);
 		expect(s.improveUrl).toContain("workers.dev");
 		void DEFAULT_SETTINGS;

@@ -15,7 +15,7 @@ import {
 } from "./dictation-range";
 import { AudioRecorder, audioExtension } from "./recorder";
 import { createProvider } from "./providers";
-import { convertPlainText, dictatePipeline } from "./pipeline";
+import { convertImageToLatex, convertPlainText, dictatePipeline } from "./pipeline";
 import { cleanPdfText, trailingEllipsisLength } from "./text-clean";
 import { friendlyError } from "./errors";
 import { INSTALL_STEPS, InstallProgress, LocalModeManager, LocalStatus } from "./local/manager";
@@ -54,6 +54,12 @@ export default class LatexVoicePlugin extends Plugin {
 			sttPort: this.settings.sttPort,
 			llmPort: this.settings.llmPort,
 			llmApiKey: this.settings.localLlmApiKey,
+			paths: {
+				whisperServerPath: this.settings.whisperServerPath,
+				llamaServerPath: this.settings.llamaServerPath,
+				whisperModelPath: this.settings.whisperModelPath,
+				llmModelPath: this.settings.llmModelPath,
+			},
 		});
 
 		if (this.settings.providerId === "local" && this.settings.autoStartLocal) {
@@ -120,7 +126,44 @@ export default class LatexVoicePlugin extends Plugin {
 		}
 	}
 
+	private async readClipboardImage(): Promise<string | null> {
+		try {
+			const items = await navigator.clipboard.read();
+			for (const item of items) {
+				const type = item.types.find((t) => t === "image/png" || t === "image/jpeg");
+				if (!type) continue;
+				const blob = await item.getType(type);
+				const buf = new Uint8Array(await blob.arrayBuffer());
+				let bin = "";
+				for (let i = 0; i < buf.length; i += 8192) {
+					bin += String.fromCharCode(...buf.subarray(i, i + 8192));
+				}
+				return btoa(bin);
+			}
+			return null;
+		} catch {
+			return null;
+		}
+	}
+
 	private async pasteClipboardAsLatex(editor: Editor): Promise<void> {
+		const imageBase64 = await this.readClipboardImage();
+		if (imageBase64) {
+			if (!this.settings.improveEnabled) {
+				new Notice(
+					"Vibe LaTeX: para pegar imágenes como LaTeX activá \"Revisar con la nube\" en Ajustes → Avanzado.",
+				);
+				return;
+			}
+			new Notice("Vibe LaTeX: convirtiendo la imagen…");
+			const latex = await convertImageToLatex(imageBase64, this.settings);
+			if (!latex) {
+				new Notice("Vibe LaTeX: no pude convertir la imagen.");
+				return;
+			}
+			editor.replaceSelection(latex);
+			return;
+		}
 		let raw = "";
 		try {
 			raw = await navigator.clipboard.readText();
@@ -770,6 +813,7 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		};
 
 		this.renderServerGroup(content, status);
+		this.renderPathsGroup(content);
 		this.renderProviderGroup(content);
 		this.renderPromptGroup(content);
 		this.renderImproveGroup(content);
@@ -964,30 +1008,59 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 			});
 	}
 
+	private renderPathsGroup(container: HTMLElement): void {
+		this.subHeader(container, "Rutas manuales");
+		const s = this.plugin.settings;
+		const pathSetting = (
+			name: string,
+			desc: string,
+			get: () => string,
+			set: (v: string) => void,
+		) =>
+			new Setting(container)
+				.setName(name)
+				.setDesc(desc)
+				.addText((t) =>
+					t.setValue(get()).onChange(async (v) => {
+						set(v.trim());
+						await this.plugin.saveSettings();
+					}),
+				);
+		pathSetting(
+			"whisper-server",
+			"Ejecutable de whisper.cpp ya instalado (vacío: se busca solo).",
+			() => s.whisperServerPath,
+			(v) => (s.whisperServerPath = v),
+		);
+		pathSetting(
+			"llama-server",
+			"Ejecutable de llama.cpp ya instalado (vacío: se busca solo).",
+			() => s.llamaServerPath,
+			(v) => (s.llamaServerPath = v),
+		);
+		pathSetting(
+			"Modelo de voz (.bin/.gguf)",
+			"Modelo de whisper ya descargado (vacío: se busca ggml-small.bin).",
+			() => s.whisperModelPath,
+			(v) => (s.whisperModelPath = v),
+		);
+		pathSetting(
+			"Modelo de conversión (.gguf)",
+			"Modelo de lenguaje ya descargado (vacío: se busca Qwen3.5-9B-Q4_K_M.gguf).",
+			() => s.llmModelPath,
+			(v) => (s.llmModelPath = v),
+		);
+	}
+
 	private renderImproveGroup(container: HTMLElement): void {
 		this.subHeader(container, "Corrección de términos");
 		const s = this.plugin.settings;
 
-		new Setting(container)
-			.setName("Glosario")
-			.setDesc(
-				"Correcciones de transcripción, una por línea: mal = bien. Se aplican antes de convertir.",
-			)
-			.addTextArea((t) => {
-				t.inputEl.rows = 4;
-				t.inputEl.style.width = "100%";
-				t.setPlaceholder("route hardware = Routh-Hurwitz");
-				t.setValue(s.glossary.join("\n"));
-				t.onChange(async (v) => {
-					s.glossary = v.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
-					await this.plugin.saveSettings();
-				});
-			});
 
 		new Setting(container)
 			.setName("Revisar con la nube")
 			.setDesc(
-				"Envía cada resultado a un worker gratuito que corrige términos técnicos mal transcritos sin agregar contenido. Si falla, se usa el texto original.",
+				"Envía cada resultado a un worker gratuito que corrige términos técnicos mal transcritos sin agregar contenido. También habilita pegar imágenes del portapapeles como LaTeX. Si falla, se usa el texto original.",
 			)
 			.addToggle((t) =>
 				t.setValue(s.improveEnabled).onChange(async (v) => {

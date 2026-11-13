@@ -1,4 +1,3 @@
-import { DEFAULT_GLOSSARY, glossaryToLines } from "./glossary";
 export const DEFAULT_CONVERSION_PROMPT_ES = `Convierte un dictado matemático en español en notas de Obsidian con Markdown y LaTeX.
 
 Reglas:
@@ -68,9 +67,12 @@ export interface LatexVoiceSettings {
 	conversionPrompt: string;
 	/** Inserts the transcript immediately, then swaps it for the converted LaTeX. */
 	streamingInsert: boolean;
-	glossary: string[];
 	improveEnabled: boolean;
 	improveUrl: string;
+	whisperServerPath: string;
+	llamaServerPath: string;
+	whisperModelPath: string;
+	llmModelPath: string;
 	saveAudio: boolean;
 	audioFolder: string;
 	/** Silence after speech that ends a phrase, in milliseconds. */
@@ -108,9 +110,12 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	transcriptionContext: DEFAULT_TRANSCRIPTION_CONTEXT_ES,
 	conversionPrompt: DEFAULT_CONVERSION_PROMPT_ES,
 	streamingInsert: true,
-	glossary: glossaryToLines(DEFAULT_GLOSSARY),
 	improveEnabled: false,
 	improveUrl: "https://vibe-latex-improve.franprzdev.workers.dev",
+	whisperServerPath: "",
+	llamaServerPath: "",
+	whisperModelPath: "",
+	llmModelPath: "",
 	saveAudio: false,
 	audioFolder: "recordings",
 	silenceMs: 2800,
@@ -178,6 +183,7 @@ export function migrateSettings(
 ): LatexVoiceSettings {
 	const data = { ...(raw ?? {}) };
 	delete data.language;
+	delete data.glossary;
 
 	if (data.sttPort === 8081) data.sttPort = DEFAULT_SETTINGS.sttPort;
 	if (data.transcriptionBaseUrl === "http://127.0.0.1:8081")
@@ -210,12 +216,14 @@ export function migrateSettings(
 		(settings.transcriptionContext.startsWith("Dictado matemático en español:") &&
 			!settings.transcriptionContext.includes("Routh-Hurwitz")))
 		settings.transcriptionContext = DEFAULT_TRANSCRIPTION_CONTEXT_ES;
-	if (!Array.isArray(settings.glossary) || !settings.glossary.every((g) => typeof g === "string"))
-		settings.glossary = glossaryToLines(DEFAULT_GLOSSARY);
 	if (typeof settings.improveEnabled !== "boolean")
 		settings.improveEnabled = DEFAULT_SETTINGS.improveEnabled;
 	if (typeof settings.improveUrl !== "string")
 		settings.improveUrl = DEFAULT_SETTINGS.improveUrl;
+	if (typeof settings.whisperServerPath !== "string") settings.whisperServerPath = "";
+	if (typeof settings.llamaServerPath !== "string") settings.llamaServerPath = "";
+	if (typeof settings.whisperModelPath !== "string") settings.whisperModelPath = "";
+	if (typeof settings.llmModelPath !== "string") settings.llmModelPath = "";
 	if (typeof settings.streamingInsert !== "boolean")
 		settings.streamingInsert = DEFAULT_SETTINGS.streamingInsert;
 	if (!isLastDictation(settings.lastDictation))
