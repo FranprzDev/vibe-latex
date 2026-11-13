@@ -48,6 +48,32 @@ describe("migrateSettings", () => {
 		expect(migrateSettings({ lastDictation: { from: 1 } }).lastDictation).toBeNull();
 	});
 
+	it("defaults previousRemoteSettings to null when absent", () => {
+		expect(migrateSettings(null).previousRemoteSettings).toBeNull();
+		expect(migrateSettings({ openaiApiKey: "sk-test" }).previousRemoteSettings).toBeNull();
+	});
+
+	it("keeps a well-formed previousRemoteSettings", () => {
+		const previous = {
+			providerId: "openai",
+			transcriptionBaseUrl: "https://api.openai.com/v1",
+			conversionBaseUrl: "https://api.openai.com/v1",
+			transcriptionModel: "gpt-transcribe",
+			conversionModel: "gpt-6-luna",
+		};
+		expect(migrateSettings({ previousRemoteSettings: previous }).previousRemoteSettings)
+			.toEqual(previous);
+	});
+
+	it("drops a malformed previousRemoteSettings to null", () => {
+		expect(migrateSettings({
+			previousRemoteSettings: { providerId: "openai", transcriptionBaseUrl: 5 },
+		}).previousRemoteSettings).toBeNull();
+		expect(migrateSettings({
+			previousRemoteSettings: "not-an-object",
+		}).previousRemoteSettings).toBeNull();
+	});
+
 	it("merges partial usage counters over the defaults", () => {
 		const s = migrateSettings({ usage: { requests: 3 } as never });
 		expect(s.usage.requests).toBe(3);

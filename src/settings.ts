@@ -21,6 +21,14 @@ export interface LastDictation {
 	text: string;
 }
 
+export interface PreviousRemoteSettings {
+	providerId: string;
+	transcriptionBaseUrl: string;
+	conversionBaseUrl: string;
+	transcriptionModel: string;
+	conversionModel: string;
+}
+
 export interface LatexVoiceSettings {
 	providerId: string;
 	openaiApiKey: string;
@@ -50,6 +58,8 @@ export interface LatexVoiceSettings {
 	};
 	/** Last inserted phrase, so "Corregir la última frase" survives a reload. */
 	lastDictation?: LastDictation | null;
+	/** Remote provider config to restore when local mode is deactivated. */
+	previousRemoteSettings?: PreviousRemoteSettings | null;
 	/** E2E only. Requires devMode=true AND testAudioPath set — otherwise ignored. */
 	devMode?: boolean;
 	testAudioPath?: string;
@@ -75,6 +85,7 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	autoStartLocal: true,
 	usage: { audioSeconds: 0, inputTokens: 0, outputTokens: 0, requests: 0 },
 	lastDictation: null,
+	previousRemoteSettings: null,
 };
 
 /**
@@ -101,6 +112,16 @@ function isLastDictation(value: unknown): value is LastDictation {
 		typeof v.from === "number" &&
 		typeof v.to === "number" &&
 		typeof v.text === "string";
+}
+
+function isPreviousRemoteSettings(value: unknown): value is PreviousRemoteSettings {
+	if (!value || typeof value !== "object") return false;
+	const v = value as Record<string, unknown>;
+	return typeof v.providerId === "string" &&
+		typeof v.transcriptionBaseUrl === "string" &&
+		typeof v.conversionBaseUrl === "string" &&
+		typeof v.transcriptionModel === "string" &&
+		typeof v.conversionModel === "string";
 }
 
 /** Keeps a stored duration within safe bounds, falling back to the default. */
@@ -148,6 +169,8 @@ export function migrateSettings(
 		settings.transcriptionContext = DEFAULT_TRANSCRIPTION_CONTEXT_ES;
 	if (!isLastDictation(settings.lastDictation))
 		settings.lastDictation = null;
+	if (!isPreviousRemoteSettings(settings.previousRemoteSettings))
+		settings.previousRemoteSettings = null;
 	settings.silenceMs = clampDuration(settings.silenceMs, DEFAULT_SETTINGS.silenceMs, 500, 10_000);
 	settings.maxPhraseMs = clampDuration(settings.maxPhraseMs, DEFAULT_SETTINGS.maxPhraseMs, 5_000, 300_000);
 	settings.graceMs = clampDuration(settings.graceMs, DEFAULT_SETTINGS.graceMs, 1_000, 60_000);

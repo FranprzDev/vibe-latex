@@ -367,10 +367,39 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 			section.createEl("p", {
 				text: "Dictado gratis y sin nube: el plugin descarga e inicia todo solo (~6,5 GB la primera vez).",
 			});
+			this.renderHowToDictate(section);
 			return;
 		}
-		const servers = status.running.stt || status.running.llm ? "en ejecución" : "detenidos";
-		section.createEl("p", { text: `Modo local instalado — servidores ${servers}.` });
+
+		const localActive = this.plugin.settings.providerId === "local";
+		new Setting(section)
+			.setName("Modo local")
+			.setDesc(`Dictado local ${localActive ? "activado" : "desactivado"}`)
+			.addToggle((t) =>
+				t.setValue(localActive).onChange(async (value) => {
+					if (value) {
+						await this.activateLocal();
+						try {
+							await this.plugin.localManager.start();
+						} catch (error) {
+							new Notice(`Vibe LaTeX: ${friendlyError(error)}`);
+						}
+					} else {
+						await this.deactivateLocal();
+						await this.plugin.localManager.stop();
+					}
+					this.display();
+				})
+			);
+
+		const settings = this.plugin.settings;
+		section.createEl("p", {
+			text: `Servidor de voz (whisper.cpp): ${status.running.stt ? "corriendo" : "detenido"} — puerto ${settings.sttPort}`,
+		});
+		section.createEl("p", {
+			text: `Servidor de conversión (llama.cpp): ${status.running.llm ? "corriendo" : "detenido"} — puerto ${settings.llmPort}`,
+		});
+
 		const running = status.running.stt && status.running.llm;
 		const row = section.createDiv();
 		const toggle = row.createEl("button", { text: running ? "Detener" : "Iniciar" });
@@ -384,15 +413,14 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 			}
 			this.display();
 		};
-		if (this.plugin.settings.providerId !== "local") {
-			const use = row.createEl("button", { text: "Usar el modo local" });
-			use.addClass("mod-cta");
-			use.style.marginLeft = "8px";
-			use.onclick = async () => {
-				await this.activateLocal();
-				this.display();
-			};
-		}
+
+		this.renderHowToDictate(section);
+	}
+
+	private renderHowToDictate(section: HTMLElement): void {
+		section.createEl("p", {
+			text: "Para dictar: ícono de micrófono en la barra lateral izquierda, o el atajo Cmd/Ctrl+Shift+M. También desde la paleta de comandos: «Vibe LaTeX: Iniciar o detener el dictado por voz».",
+		});
 	}
 
 	private renderProgress(section: HTMLElement): void {
@@ -498,11 +526,40 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 
 	private async activateLocal(): Promise<void> {
 		const settings = this.plugin.settings;
+		if (settings.providerId !== "local") {
+			settings.previousRemoteSettings = {
+				providerId: settings.providerId,
+				transcriptionBaseUrl: settings.transcriptionBaseUrl,
+				conversionBaseUrl: settings.conversionBaseUrl,
+				transcriptionModel: settings.transcriptionModel,
+				conversionModel: settings.conversionModel,
+			};
+		}
 		settings.providerId = "local";
 		settings.transcriptionBaseUrl = `http://127.0.0.1:${settings.sttPort}`;
 		settings.conversionBaseUrl = `http://127.0.0.1:${settings.llmPort}/v1`;
 		settings.transcriptionModel = "whisper-small";
 		settings.conversionModel = "qwen3.5-9b";
+		await this.plugin.saveSettings();
+	}
+
+	private async deactivateLocal(): Promise<void> {
+		const settings = this.plugin.settings;
+		const previous = settings.previousRemoteSettings;
+		if (previous) {
+			settings.providerId = previous.providerId;
+			settings.transcriptionBaseUrl = previous.transcriptionBaseUrl;
+			settings.conversionBaseUrl = previous.conversionBaseUrl;
+			settings.transcriptionModel = previous.transcriptionModel;
+			settings.conversionModel = previous.conversionModel;
+		} else {
+			settings.providerId = "openai";
+			settings.transcriptionBaseUrl = DEFAULT_SETTINGS.transcriptionBaseUrl;
+			settings.conversionBaseUrl = DEFAULT_SETTINGS.conversionBaseUrl;
+			settings.transcriptionModel = DEFAULT_SETTINGS.transcriptionModel;
+			settings.conversionModel = DEFAULT_SETTINGS.conversionModel;
+		}
+		settings.previousRemoteSettings = null;
 		await this.plugin.saveSettings();
 	}
 
