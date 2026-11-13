@@ -42,14 +42,57 @@ describe("dictatePipeline", () => {
 		).rejects.toThrow("mic dead");
 	});
 
-	it("rejects an empty conversion instead of inserting an empty correction", async () => {
+	it("falls back to the raw transcript when the conversion is empty", async () => {
 		const emptyProvider: VoiceProvider = {
 			...fakeProvider,
 			convertToLatex: async () => ({ text: "  " }),
 		};
-		await expect(
-			dictatePipeline(emptyProvider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS),
-		).rejects.toThrow("empty conversion");
+		const { output } = await dictatePipeline(emptyProvider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		expect(output).toBe("transcribed d.m4a");
+	});
+
+	it("falls back to the raw transcript when the conversion is a meta response", async () => {
+		const metaProvider: VoiceProvider = {
+			...fakeProvider,
+			convertToLatex: async () => ({
+				text: "No se ha dictado ninguna expresión matemática ni texto explicativo en esta entrada. Por favor, proporcione el dictado.",
+			}),
+		};
+		const { output } = await dictatePipeline(metaProvider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		expect(output).toBe("transcribed d.m4a");
+	});
+
+	it("rejects silence-hallucination transcripts without calling the model", async () => {
+		for (const ghost of ["", "   ", "...", "Gracias", "gracias!", "Subtitulos por Amara.org"]) {
+			const convert = vi.fn(async () => ({ text: "converted" }));
+			const ghostProvider: VoiceProvider = {
+				...fakeProvider,
+				transcribe: async () => ({ text: ghost }),
+				convertToLatex: convert,
+			};
+			await expect(
+				dictatePipeline(ghostProvider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS),
+			).rejects.toThrow("empty transcript");
+			expect(convert).not.toHaveBeenCalled();
+		}
+	});
+
+	it("rewrites dictated enumerations as 1) 2) 3) lists", async () => {
+		const listProvider: VoiceProvider = {
+			...fakeProvider,
+			convertToLatex: async () => ({ text: "1. El primero es la respuesta de estado cero\n2. El segundo es la respuesta de entrada cero" }),
+		};
+		const { output } = await dictatePipeline(listProvider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		expect(output).toBe("1) El primero es la respuesta de estado cero\n2) El segundo es la respuesta de entrada cero");
+	});
+
+	it("leaves a single numbered line untouched", async () => {
+		const singleProvider: VoiceProvider = {
+			...fakeProvider,
+			convertToLatex: async () => ({ text: "1. Introducción" }),
+		};
+		const { output } = await dictatePipeline(singleProvider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		expect(output).toBe("1. Introducción");
 	});
 
 	it("forwards the abort signal to both provider calls", async () => {

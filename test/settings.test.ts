@@ -162,7 +162,13 @@ describe("0.5.1 port migration", () => {
 });
 
 describe("DEFAULT_CONVERSION_PROMPT_ES symbol vocabulary", () => {
-	it("maps spoken math concepts to LaTeX symbols", () => {
+		it("forbids meta responses and requires the 1) list style", () => {
+		expect(DEFAULT_CONVERSION_PROMPT_ES).toContain("no se ha dictado ninguna expresión");
+		expect(DEFAULT_CONVERSION_PROMPT_ES).toContain('"1) ..."');
+		expect(DEFAULT_CONVERSION_PROMPT_ES).toContain('(nunca "1.")');
+	});
+
+it("maps spoken math concepts to LaTeX symbols", () => {
 		for (const needle of ["\\infty", "\\sum", "\\prod", "\\lim_{x \\to a}", "\\sqrt", "\\pi", "\\geq", "\\leq", "\\neq", "\\approx", "\\pm", "\\in", "\\forall", "\\exists", "\\cup", "\\cap", "\\alpha", "\\omega"]) {
 			expect(DEFAULT_CONVERSION_PROMPT_ES).toContain(needle);
 		}

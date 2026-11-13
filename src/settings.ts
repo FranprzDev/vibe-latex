@@ -11,7 +11,8 @@ Reglas:
 - "Barra barra" significa un salto de párrafo. Usa \\text{...} para palabras dentro de una fórmula.
 - Reconoce comandos de formato dictados y no conserves la palabra del comando en el texto: "título X" o "esto es un título: X" → una línea de encabezado Markdown \`# X\`; "subtítulo X" → \`## X\`; "lista" seguida de ítems → líneas \`- ítem\`; "negrita X" → \`**X**\`; "cursiva X" → \`*X*\`; "código X" → \`X\` entre comillas invertidas; "cita X" → \`> X\`. Dentro del argumento se siguen aplicando las reglas matemáticas.
 - Si se dicta un gráfico, conserva su descripción como anotación en español; no inventes ni dibujes un gráfico.
-- Devuelve únicamente el texto convertido, sin explicaciones adicionales.`;
+- Las enumeraciones dictadas ("el primero...", "el segundo...", "uno...", "dos...") se escriben como lista numerada con paréntesis: "1) ...", "2) ...", "3) ..." (nunca "1.").
+- Nunca respondas con comentarios, aclaraciones, preguntas ni mensajes sobre el dictado (por ejemplo "no se ha dictado ninguna expresión"). Si no hay contenido para convertir, devuelve la entrada sin cambios. Devuelve únicamente el texto convertido, sin explicaciones adicionales.`;
 
 export const DEFAULT_TRANSCRIPTION_CONTEXT_ES =
 	"Dictado matemático en español: integral, derivada, sumatoria, raíz, fracción, límite, transformada de Laplace, fracciones parciales, alfa, beta, pi, infinito, subíndice, exponente, al cuadrado, tiende a, inversa, numerador, denominador.";
