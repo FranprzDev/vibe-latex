@@ -83,17 +83,20 @@ export class LocalProvider implements VoiceProvider {
 					{ role: "system", content: opts.systemPrompt },
 					{ role: "user", content: transcript },
 				],
+				max_tokens: 1024,
+				chat_template_kwargs: { enable_thinking: false },
 			}),
 			signal: anySignal([AbortSignal.timeout(CONVERT_TIMEOUT_MS), opts.signal]),
 		});
 
 		const data = (await res.json()) as ChatResponse;
-		const content = data.choices?.[0]?.message?.content;
+		const raw = data.choices?.[0]?.message?.content;
+		const content = raw?.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim();
 		if (!res.ok || !content) {
 			throw new Error(`${data.error?.message ?? "Conversion failed"} (HTTP ${res.status})`);
 		}
 		return {
-			text: content.trim(),
+			text: content,
 			inputTokens: data.usage?.prompt_tokens,
 			outputTokens: data.usage?.completion_tokens,
 		};
