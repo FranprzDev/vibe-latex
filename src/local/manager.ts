@@ -49,27 +49,27 @@ export interface LocalAssets {
 }
 
 const STT_WINDOWS_X64: Asset = {
-	url: "https://github.com/FranprzDev/vibe-latex/releases/latest/download/vibe-stt-server-windows-x64.zip",
+	url: "https://github.com/FranprzDev/vibe-latex/releases/download/stt-v1.9.5/vibe-stt-server-windows-x64.zip",
 	fileName: "vibe-stt-server-windows-x64.zip",
-	sha256: "e1b6a96f4a5ea2fbc60891256d9cc5cd4e06dcd75e709870527603dddca9cb5b",
+	sha256: "6ae141da58e7599df38273a72b6e5904f35424a34a7224ef311cdec388b9d270",
 };
 
 const STT_MACOS_ARM64: Asset = {
-	url: "https://github.com/FranprzDev/vibe-latex/releases/latest/download/vibe-stt-server-macos-arm64.tar.gz",
+	url: "https://github.com/FranprzDev/vibe-latex/releases/download/stt-v1.9.5/vibe-stt-server-macos-arm64.tar.gz",
 	fileName: "vibe-stt-server-macos-arm64.tar.gz",
-	sha256: "332cae1f212a1a07019bf6e20f6929f8ac4b41fe601485f6ddeaa20d32b8279e",
+	sha256: "611181cf253209d633691a08a182b6b93b4ce9d8444509e4b53ab6f1a7468232",
 };
 
 const STT_MACOS_X64: Asset = {
-	url: "https://github.com/FranprzDev/vibe-latex/releases/latest/download/vibe-stt-server-macos-x64.tar.gz",
+	url: "https://github.com/FranprzDev/vibe-latex/releases/download/stt-v1.9.5/vibe-stt-server-macos-x64.tar.gz",
 	fileName: "vibe-stt-server-macos-x64.tar.gz",
-	sha256: "721b088ae29f3644637ce449e219b0c077d9403fc86f3844384895d713557b88",
+	sha256: "d01e1b62ad589b50d4f3cbeffb6e49e586f00516e1660d9e3dcc7a82b6ca45c8",
 };
 
 const STT_LINUX_X64: Asset = {
-	url: "https://github.com/FranprzDev/vibe-latex/releases/latest/download/vibe-stt-server-linux-x64.tar.gz",
+	url: "https://github.com/FranprzDev/vibe-latex/releases/download/stt-v1.9.5/vibe-stt-server-linux-x64.tar.gz",
 	fileName: "vibe-stt-server-linux-x64.tar.gz",
-	sha256: "82efafd0442558e4dc1744102e89a0e3b7a1843b26c08248d4c3508add6a79ad",
+	sha256: "f5d1291b27792fdd396b92b03e9d0c399e01cfdf1af78cc2bac64dbdc868ba62",
 };
 
 const LLAMA_WIN_X64: Asset = {
