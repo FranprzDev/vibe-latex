@@ -4,6 +4,14 @@ Dictá ecuaciones en español y convertí lo que vas explicando en Markdown y La
 
 > “la integral de a a b de efe de equis de equis” → `$\int_a^b f(x)\,dx$`
 
+## Instalación
+
+a. **BRAT (recomendado)**: instalá el plugin [BRAT](https://github.com/TfTHacker/obsidian42-brat) desde la lista de plugins de la comunidad. En los ajustes de BRAT usá **Add beta plugin** y pegá `FranprzDev/vibe-latex`; BRAT instala y mantiene actualizado el plugin.
+
+b. **Manual**: descargá `main.js` y `manifest.json` del último release en GitHub y copialos en `<tu-vault>/.obsidian/plugins/vibe-latex/`, después habilitá **Vibe LaTeX** en Ajustes → Plugins de la comunidad.
+
+c. **Desde el código fuente**: `npm install && npm run build` y `./install.sh /ruta/a/tu/vault`.
+
 ## Uso
 
 1. Ejecutá **Vibe LaTeX: Iniciar o detener el dictado por voz** desde la paleta de comandos o con el atajo `Cmd/Ctrl+Shift+M`.
@@ -31,13 +39,20 @@ Podés usar el plugin sin clave ni costos con servidores locales compatibles con
    ollama pull qwen2.5:7b
    ```
 
-2. Instalá [Speaches](https://github.com/speaches-ai/speaches) para la transcripción de voz:
+2. Elegí un servidor de transcripción de voz:
 
-   ```bash
-   docker run -p 8000:8000 ghcr.io/speaches-ai/speaches:latest-cpu
-   ```
+   a. Sin Docker: instalá las dependencias y corré el servidor incluido en el repo (funciona en Windows, Mac y Linux; la primera vez descarga el modelo de whisper):
 
-   También podés usar un servidor de whisper.cpp para el reconocimiento de voz.
+      ```bash
+      pip install faster-whisper fastapi uvicorn python-multipart
+      python scripts/local_stt.py
+      ```
+
+   b. Con Docker: usá [Speaches](https://github.com/speaches-ai/speaches):
+
+      ```bash
+      docker run -p 8000:8000 ghcr.io/speaches-ai/speaches:latest-cpu
+      ```
 
 3. En **Ajustes → Vibe LaTeX**, presioná el botón rápido **Local gratis**. Alternativamente, configurá **URL de transcripción** en `http://localhost:8000/v1` y **URL de conversión** en `http://localhost:11434/v1`, dejá la clave API vacía, usá el modelo de transcripción `Systran/faster-whisper-small` y el modelo de conversión `qwen2.5:7b`.
 

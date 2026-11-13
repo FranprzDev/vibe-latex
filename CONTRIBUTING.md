@@ -58,5 +58,8 @@ poder cubrirla con tests unitarios.
 
 1. Mové las entradas de *Unreleased* a la versión nueva en `CHANGELOG.md`.
 2. Actualizá `package.json`, `manifest.json` y `versions.json`.
-3. Mergeá a `main` y publicá un tag (`vX.Y.Z`). El workflow de release adjunta
-   `main.js`, `manifest.json` y `versions.json` al GitHub Release.
+3. Mergeá a `main` y publicá un tag `X.Y.Z` **sin** el prefijo `v` (lo exige
+   el listado oficial de plugins de la comunidad de Obsidian, porque el tag
+   debe coincidir exactamente con la versión de `manifest.json`). El workflow
+   de release adjunta `main.js`, `manifest.json` y `versions.json` al GitHub
+   Release.
