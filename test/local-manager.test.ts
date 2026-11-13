@@ -1,6 +1,26 @@
-import { describe, it, expect } from "vitest";
-import { resolveAssets } from "../src/local/manager";
+import { describe, it, expect, vi } from "vitest";
+import { createServer } from "http";
+import type { Server } from "http";
+import type { AddressInfo } from "net";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import {
+	INSTALL_STEPS,
+	LocalModeManager,
+	resolveAssets,
+} from "../src/local/manager";
+import type { InstallProgress, LocalAssets } from "../src/local/manager";
 import { DEFAULT_SETTINGS, migrateSettings, needsApiKey } from "../src/settings";
+
+vi.mock("child_process", () => ({
+	spawn: vi.fn(),
+	execFile: vi.fn(
+		(_file: string, _args: string[], callback: (error: Error | null) => void) => {
+			callback(null);
+		},
+	),
+}));
 
 const STT_BASE = "https://github.com/FranprzDev/vibe-latex/releases/latest/download";
 const LLAMA_BASE = "https://github.com/ggml-org/llama.cpp/releases/download/b12340";
@@ -86,3 +106,96 @@ describe("local mode settings", () => {
 		expect(needsApiKey({ ...DEFAULT_SETTINGS, providerId: "openai" })).toBe(true);
 	});
 });
+
+function startServer(): Promise<{ server: Server; port: number; hits: string[] }> {
+	return new Promise((resolve) => {
+		const hits: string[] = [];
+		const server = createServer((req, res) => {
+			hits.push(req.url ?? "");
+			if (req.url?.startsWith("/redirect")) {
+				res.writeHead(302, { Location: "/file" });
+				res.end();
+				return;
+			}
+			res.writeHead(200, { "Content-Length": "6" });
+			res.write("abc");
+			setTimeout(() => res.end("def"), 20);
+		});
+		server.listen(0, "127.0.0.1", () => {
+			resolve({ server, port: (server.address() as AddressInfo).port, hits });
+		});
+	});
+}
+
+function assetsFor(base: string): LocalAssets {
+	return {
+		stt: { url: `${base}/redirect`, fileName: "stt.tar.gz" },
+		llama: { url: `${base}/redirect`, fileName: "llama.tar.gz" },
+		whisperModel: { url: `${base}/file`, fileName: "ggml-small.bin" },
+		llmModel: { url: `${base}/file`, fileName: "model.gguf" },
+	};
+}
+
+describe("LocalModeManager.install", () => {
+	it("follows redirects, writes bytes, and reports phases in order", async () => {
+		const basePath = await fs.promises.mkdtemp(path.join(os.tmpdir(), "vibe-latex-"));
+		const { server, port, hits } = await startServer();
+		const base = `http://127.0.0.1:${port}`;
+		try {
+			const manager = new LocalModeManager({
+				basePath,
+				pluginDir: "vibe-latex",
+				sttPort: 10000,
+				llmPort: 8082,
+			});
+			const events: InstallProgress[] = [];
+			await manager.install((p) => events.push({ ...p }), assetsFor(base));
+
+			const downloads = events.filter((e) => e.phase === "download");
+			const seen: string[] = [];
+			for (const event of downloads) {
+				if (seen[seen.length - 1] !== event.step) seen.push(event.step);
+			}
+			expect(seen).toEqual([...INSTALL_STEPS]);
+
+			for (const step of INSTALL_STEPS) {
+				const bytes = downloads
+					.filter((e) => e.step === step)
+					.map((e) => e.downloadedBytes);
+				expect(bytes.length).toBeGreaterThan(0);
+				for (let i = 1; i < bytes.length; i++) {
+					expect(bytes[i]).toBeGreaterThan(bytes[i - 1]);
+				}
+				expect(bytes[bytes.length - 1]).toBe(6);
+			}
+
+			expect(events.filter((e) => e.phase === "extract").map((e) => e.step)).toEqual([
+				"stt-server",
+				"llama-server",
+			]);
+			for (const step of ["stt-server", "llama-server"]) {
+				const extractIndex = events.findIndex((e) => e.step === step && e.phase === "extract");
+				const lastDownloadIndex = events.reduce(
+					(acc, e, i) => (e.step === step && e.phase === "download" ? i : acc),
+					-1,
+				);
+				expect(extractIndex).toBeGreaterThan(lastDownloadIndex);
+			}
+
+			expect(hits.filter((h) => h === "/redirect").length).toBe(2);
+			expect(hits.filter((h) => h === "/file").length).toBe(4);
+
+			const modelsDir = path.join(basePath, "vibe-latex", "local", "models");
+			expect(await fs.promises.readFile(path.join(modelsDir, "ggml-small.bin"), "utf8")).toBe(
+				"abcdef",
+			);
+			expect(await fs.promises.readFile(path.join(modelsDir, "model.gguf"), "utf8")).toBe(
+				"abcdef",
+			);
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+			await fs.promises.rm(basePath, { recursive: true, force: true });
+		}
+	});
+});
+

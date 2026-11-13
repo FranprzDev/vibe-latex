@@ -1,5 +1,7 @@
 import { spawn, execFile } from "child_process";
 import type { ChildProcess } from "child_process";
+import { get as httpGet } from "http";
+import { get as httpsGet } from "https";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -18,9 +20,18 @@ export interface LocalStatus {
 
 export interface InstallProgress {
 	step: string;
+	phase: "download" | "extract";
 	downloadedBytes: number;
 	totalBytes: number | null;
 }
+
+export const INSTALL_STEPS = [
+	"stt-server",
+	"llama-server",
+	"whisper-model",
+	"llm-model",
+] as const;
+
 
 interface Asset {
 	url: string;
@@ -199,42 +210,86 @@ export class LocalModeManager {
 		};
 	}
 
-	private async download(
+	private download(
 		step: string,
 		asset: Asset,
 		tmpDir: string,
 		onProgress?: (p: InstallProgress) => void,
 	): Promise<string> {
 		const dest = path.join(tmpDir, asset.fileName);
-		const res = await fetch(asset.url);
-		if (!res.ok || !res.body) {
-			throw new Error(`descarga de ${step} falló (HTTP ${res.status})`);
-		}
-		const header = res.headers.get("content-length");
-		const parsed = header === null ? NaN : Number(header);
-		const totalBytes = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+		return new Promise<string>((resolve, reject) => {
+			void fs.promises.open(dest, "w").then((handle) => {
+				let downloadedBytes = 0;
+				let settled = false;
+				let writeChain: Promise<unknown> = Promise.resolve();
 
-		const handle = await fs.promises.open(dest, "w");
-		let downloadedBytes = 0;
-		try {
-			const reader = res.body.getReader();
-			for (;;) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				await handle.write(value);
-				downloadedBytes += value.byteLength;
-				onProgress?.({ step, downloadedBytes, totalBytes });
-			}
-		} finally {
-			await handle.close();
-		}
-		return dest;
+				const fail = (error: Error) => {
+					if (settled) return;
+					settled = true;
+					writeChain
+						.catch(() => undefined)
+						.then(() => handle.close())
+						.catch(() => undefined)
+						.then(() => reject(error));
+				};
+
+				const request = (url: string, redirects: number) => {
+					const getter = (url.startsWith("http:") ? httpGet : httpsGet) as typeof httpsGet;
+					const req = getter(url, (res) => {
+						const status = res.statusCode ?? 0;
+						const location = res.headers.location;
+						if (status >= 300 && status < 400 && location && redirects < 5) {
+							res.resume();
+							request(new URL(location, url).toString(), redirects + 1);
+							return;
+						}
+						if (status !== 200) {
+							res.resume();
+							fail(new Error(`descarga de ${step} falló (HTTP ${status})`));
+							return;
+						}
+						const rawHeader = res.headers["content-length"];
+						const header = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+						const parsed = header === undefined ? NaN : Number(header);
+						const totalBytes = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+
+						res.on("data", (chunk: Buffer) => {
+							downloadedBytes += chunk.length;
+							writeChain = writeChain.then(() => handle.write(chunk));
+							onProgress?.({ step, phase: "download", downloadedBytes, totalBytes });
+						});
+						res.on("end", () => {
+							writeChain
+								.then(() => handle.close())
+								.then(() => {
+									if (settled) return;
+									settled = true;
+									resolve(dest);
+								})
+								.catch((error) =>
+									fail(error instanceof Error ? error : new Error(String(error))),
+								);
+						});
+						res.on("error", (error) => fail(error));
+					});
+					req.setTimeout(60_000, () =>
+						req.destroy(new Error("tiempo de espera agotado")),
+					);
+					req.on("error", (error) => fail(error));
+				};
+
+				request(asset.url, 0);
+			}).catch((error) => reject(error instanceof Error ? error : new Error(String(error))));
+		});
 	}
 
-	async install(onProgress?: (p: InstallProgress) => void): Promise<void> {
+	async install(
+		onProgress?: (p: InstallProgress) => void,
+		assetsOverride?: LocalAssets,
+	): Promise<void> {
 		const tmpDir = path.join(this.localRoot, "tmp");
 		await fs.promises.rm(tmpDir, { recursive: true, force: true });
-		const assets = resolveAssets(process.platform, process.arch);
+		const assets = assetsOverride ?? resolveAssets(process.platform, process.arch);
 		if (!assets) {
 			throw new Error(`Plataforma no soportada: ${process.platform}/${process.arch}`);
 		}
@@ -246,11 +301,13 @@ export class LocalModeManager {
 			step = "stt-server";
 			const sttArchive = await this.download(step, assets.stt, tmpDir, onProgress);
 			await fs.promises.mkdir(this.sttDir, { recursive: true });
+			onProgress?.({ step, phase: "extract", downloadedBytes: 0, totalBytes: null });
 			await runTar(sttArchive, this.sttDir);
 
 			step = "llama-server";
 			const llamaArchive = await this.download(step, assets.llama, tmpDir, onProgress);
 			await fs.promises.mkdir(this.llamaDir, { recursive: true });
+			onProgress?.({ step, phase: "extract", downloadedBytes: 0, totalBytes: null });
 			await runTar(llamaArchive, this.llamaDir);
 
 			step = "whisper-model";
@@ -269,8 +326,8 @@ export class LocalModeManager {
 			}
 		} catch (error) {
 			await fs.promises.rm(tmpDir, { recursive: true, force: true });
-			if (!(await exists(path.join(this.modelsDir, WHISPER_MODEL.fileName))) ||
-				!(await exists(path.join(this.modelsDir, LLM_MODEL.fileName)))) {
+			if (!(await exists(path.join(this.modelsDir, assets.whisperModel.fileName))) ||
+				!(await exists(path.join(this.modelsDir, assets.llmModel.fileName)))) {
 				await fs.promises.rm(path.join(this.localRoot, "bin"), { recursive: true, force: true });
 			}
 			const message = error instanceof Error ? error.message : String(error);

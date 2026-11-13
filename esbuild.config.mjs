@@ -20,6 +20,8 @@ const context = await esbuild.context({
 		"child_process",
 		"stream",
 		"util",
+		"http",
+		"https",
 	],
 	format: "cjs",
 	target: "es2022",

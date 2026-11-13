@@ -42,6 +42,8 @@ Podés usar el plugin sin clave ni costos con servidores locales. El plugin pued
    - Los servidores escuchan en los puertos **10000** (transcripción) y **8082** (conversión), configurables desde los mismos ajustes. En Windows la conversión usa la variante Vulkan de llama.cpp, que acelera con la GPU usando los drivers normales de NVIDIA, AMD o Intel.
 3. Al terminar, el plugin activa el proveedor local, inicia los servidores y deja el dictado listo. La primera instalación descarga unos **6,5 GB** (whisper small ~0,5 GB + Qwen3.5 9B ~6 GB) y necesita unos **8 GB** de disco libre.
 
+El resto de los ajustes (puertos, endpoints, modelos, prompts y grabación) están en la sección desplegable **Avanzado**, debajo del bloque de modo local.
+
 Los binarios y modelos se guardan en `<tu-vault>/.obsidian/plugins/vibe-latex/local/`. Desde los ajustes podés iniciar o detener los servidores, y desinstalarlos por completo. La opción **Iniciar los servidores al abrir Obsidian** los levanta automáticamente cada vez que abrís la aplicación.
 
 ### Instalación manual (alternativa)
