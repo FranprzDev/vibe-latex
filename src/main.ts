@@ -308,7 +308,7 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 					s.transcriptionBaseUrl = "http://localhost:8000/v1";
 					s.conversionBaseUrl = "http://localhost:11434/v1";
 					s.transcriptionModel = "Systran/faster-whisper-small";
-					s.conversionModel = "qwen2.5:7b";
+					s.conversionModel = "qwen3.5:9b";
 					await this.plugin.saveSettings();
 					this.display();
 				})
