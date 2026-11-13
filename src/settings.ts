@@ -83,6 +83,7 @@ export interface LatexVoiceSettings {
 	graceMs: number;
 	sttPort: number;
 	llmPort: number;
+	vlModel: string;
 	localLlmApiKey: string;
 	autoStartLocal: boolean;
 	usage: {
@@ -123,6 +124,7 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	graceMs: 10_000,
 	sttPort: 10000,
 	llmPort: 8082,
+	vlModel: "450m",
 	localLlmApiKey: "",
 	autoStartLocal: true,
 	usage: { audioSeconds: 0, inputTokens: 0, outputTokens: 0, requests: 0 },
@@ -237,6 +239,7 @@ export function migrateSettings(
 	settings.graceMs = clampDuration(settings.graceMs, DEFAULT_SETTINGS.graceMs, 1_000, 60_000);
 	settings.sttPort = clampDuration(settings.sttPort, DEFAULT_SETTINGS.sttPort, 1024, 65_535);
 	settings.llmPort = clampDuration(settings.llmPort, DEFAULT_SETTINGS.llmPort, 1024, 65_535);
+	if (settings.vlModel !== "450m" && settings.vlModel !== "1.6b") settings.vlModel = "450m";
 
 	return settings;
 }

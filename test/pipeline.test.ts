@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { dictatePipeline } from "../src/pipeline";
+import { cleanVisionLatex, dictatePipeline } from "../src/pipeline";
 import { VoiceProvider } from "../src/providers";
 import { DEFAULT_SETTINGS } from "../src/settings";
 
@@ -330,5 +330,19 @@ describe("conversion speed", () => {
 		};
 		await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
 		expect(seen).toBe(128);
+	});
+});
+
+describe("cleanVisionLatex", () => {
+	it("strips the model preamble and keeps the latex", () => {
+		expect(cleanVisionLatex("The equation is:\n\n$$x = 1$$")).toBe("$$x = 1$$");
+	});
+
+	it("unwraps fenced latex blocks", () => {
+		expect(cleanVisionLatex("```latex\n\\frac{a}{b}\n```")).toBe("\\frac{a}{b}");
+	});
+
+	it("returns null for empty and meta responses", () => {
+		expect(cleanVisionLatex("   ")).toBeNull();
 	});
 });
