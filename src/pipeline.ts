@@ -155,10 +155,12 @@ export async function convertPlainText(
 export const EDIT_SYSTEM_PROMPT = `Recibís un pasaje de notas de estudio en Markdown con LaTeX y una instrucción de corrección dictada por voz, en español.
 Reglas estrictas:
 - Aplicá ÚNICAMENTE lo que pide la instrucción sobre el pasaje: correcciones de valores, signos, términos, orden o formato pedidos explícitamente.
+- Aplicá la instrucción en TODO el pasaje y en TODAS las apariciones correspondientes, no solo en la primera.
 - NUNCA agregues contenido nuevo: ni definiciones, ejemplos, pasos ni fórmulas que la instrucción no pida.
 - Conservá el formato Markdown y las fórmulas LaTeX ($...$, $$...$$) salvo que la instrucción pida cambiarlos.
+- Conservá los saltos de línea y la estructura de párrafos del pasaje original salvo que la instrucción pida otra cosa: no unas ni dividas párrafos por tu cuenta.
 - Si la instrucción es ambigua, aplicá la interpretación más literal.
-- Devolvé ÚNICAMENTE el pasaje reescrito, sin explicaciones, comentarios ni texto adicional.`;
+- Devolvé ÚNICAMENTE el pasaje reescrito, sin explicaciones, comentarios, acotaciones ni texto adicional.`;
 
 export function buildEditUserText(passage: string, instruction: string): string {
 	return `PASAJE:\n${passage}\n\nINSTRUCCIÓN:\n${instruction}`;
@@ -173,7 +175,9 @@ export async function applyVoiceEdit(
 		systemPrompt: EDIT_SYSTEM_PROMPT,
 		maxTokens: Math.min(4096, Math.max(1024, Math.ceil(passage.length / 2) + 256)),
 	});
-	const out = c.text.trim();
+	let out = c.text.trim();
+	const fence = out.match(/```(?:latex|tex|markdown|md)?\s*([\s\S]*?)```/i);
+	if (fence) out = fence[1].trim();
 	if (!out || looksLikeMetaResponse(out)) return null;
 	return out;
 }

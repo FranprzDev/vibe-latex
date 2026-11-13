@@ -13,6 +13,7 @@ import type { FileSystemAdapter } from "obsidian";
 import { randomBytes } from "crypto";
 import {
 	dictationReplacementText,
+	extendDictationRange,
 	verifiedDictationRange,
 } from "./dictation-range";
 import { AudioRecorder, audioExtension } from "./recorder";
@@ -38,6 +39,7 @@ export default class LatexVoicePlugin extends Plugin {
 	private statusBarEl!: HTMLElement;
 	private sessionAbort: AbortController | null = null;
 	private phraseAbort: AbortController | null = null;
+	private sessionRange: { filePath: string; from: number; to: number } | null = null;
 	private pendingSave: Promise<void> = Promise.resolve();
 
 	async onload() {
@@ -245,24 +247,35 @@ export default class LatexVoicePlugin extends Plugin {
 
 	private async correctByVoice(editor: Editor): Promise<void> {
 		if (this.sessionAbort) {
-			new Notice("Terminá el dictado actual antes de corregir.");
-			return;
-		}
-		const file = this.app.workspace.getActiveFile();
-		const target = this.settings.lastDictation ?? null;
-		let passage = "";
-		let range: { from: number; to: number } | null = null;
-		if (file && target && target.filePath === file.path) {
-			const verified = verifiedDictationRange(editor.getValue(), target);
-			if (verified) {
-				passage = target.text;
-				range = verified;
+			this.sessionAbort.abort();
+			const deadline = Date.now() + 4_000;
+			while (this.sessionAbort && Date.now() < deadline) {
+				await new Promise((r) => setTimeout(r, 100));
+			}
+			if (this.sessionAbort) {
+				new Notice("Vibe LaTeX: no pude terminar el dictado actual.");
+				return;
 			}
 		}
-		if (!range) {
-			const selection = editor.getSelection();
-			if (selection.trim()) passage = selection;
-			else {
+		const file = this.app.workspace.getActiveFile();
+		const content = editor.getValue();
+		const selection = editor.getSelection();
+		let passage = "";
+		let range: { from: number; to: number } | null = null;
+		if (selection.trim()) {
+			passage = selection;
+		} else {
+			const session = this.settings.lastSession ?? null;
+			const target = this.settings.lastDictation ?? null;
+			if (file && session && session.text && session.filePath === file.path &&
+				verifiedDictationRange(content, session)) {
+				passage = session.text;
+				range = { from: session.from, to: session.to };
+			} else if (file && target && target.filePath === file.path &&
+				verifiedDictationRange(content, target)) {
+				passage = target.text;
+				range = { from: target.from, to: target.to };
+			} else {
 				new Notice("Vibe LaTeX: no encuentro el último dictado. Seleccioná el pasaje a corregir.");
 				return;
 			}
@@ -306,16 +319,25 @@ export default class LatexVoicePlugin extends Plugin {
 				new Notice("Vibe LaTeX: el modelo no devolvió una corrección usable.");
 				return;
 			}
+			const finalText = passage.endsWith("\n") && !rewritten.endsWith("\n")
+				? `${rewritten}\n`
+				: rewritten;
 			if (range && file) {
-				editor.replaceRange(rewritten, editor.offsetToPos(range.from), editor.offsetToPos(range.to));
-				this.setLastDictation({
+				editor.replaceRange(
+					finalText,
+					editor.offsetToPos(range.from),
+					editor.offsetToPos(range.to),
+				);
+				const updated = {
 					filePath: file.path,
 					from: range.from,
-					to: range.from + rewritten.length,
-					text: rewritten,
-				});
+					to: range.from + finalText.length,
+					text: finalText,
+				};
+				this.settings.lastSession = updated;
+				this.setLastDictation(updated);
 			} else {
-				editor.replaceSelection(rewritten);
+				editor.replaceSelection(finalText);
 			}
 			new Notice("Vibe LaTeX: corrección aplicada.");
 		} catch (e) {
@@ -437,6 +459,7 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private async runSession(replaceTarget?: LastDictation) {
+		this.sessionRange = null;
 		this.sessionAbort = new AbortController();
 		const signal = this.sessionAbort.signal;
 		const provider = createProvider(this.settings);
@@ -552,6 +575,9 @@ export default class LatexVoicePlugin extends Plugin {
 								to: partial.from + output.length,
 								text: output,
 							});
+							this.sessionRange = extendDictationRange(
+								this.sessionRange, file.path, partial.from, partial.from + output.length,
+							);
 							editor.setCursor(editor.offsetToPos(partial.from + output.length));
 						} else {
 							if (streamed) {
@@ -577,6 +603,9 @@ export default class LatexVoicePlugin extends Plugin {
 									to: range.from + text.length,
 									text,
 								});
+								this.sessionRange = extendDictationRange(
+									this.sessionRange, file.path, range.from, range.from + text.length,
+								);
 								editor.setCursor(editor.offsetToPos(range.from + text.length));
 							} else {
 								const from = editor.getCursor("from");
@@ -598,6 +627,9 @@ export default class LatexVoicePlugin extends Plugin {
 									to: start + text.length,
 									text,
 								});
+								this.sessionRange = extendDictationRange(
+									this.sessionRange, file.path, start, start + text.length,
+								);
 								editor.setCursor(editor.offsetToPos(start + text.length));
 							}
 						}
@@ -616,8 +648,24 @@ export default class LatexVoicePlugin extends Plugin {
 		} finally {
 			this.sessionAbort = null;
 			this.updateStatus("");
+			this.persistSessionRange();
 			new Notice("Vibe LaTeX: dictado terminado.");
 		}
+	}
+
+	private persistSessionRange(): void {
+		const range = this.sessionRange;
+		this.sessionRange = null;
+		if (!range) return;
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const file = this.app.workspace.getActiveFile();
+		const text = view && file && file.path === range.filePath
+			? view.editor.getValue().slice(range.from, range.to)
+			: "";
+		this.settings.lastSession = { ...range, text };
+		this.pendingSave = this.pendingSave
+			.then(() => this.saveSettings())
+			.catch(() => undefined);
 	}
 
 	private async dictateFromFile(path: string) {
