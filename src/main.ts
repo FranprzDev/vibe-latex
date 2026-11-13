@@ -107,6 +107,7 @@ export default class LatexVoicePlugin extends Plugin {
 		this.addCommand({
 			id: "finish-phrase-now",
 			name: "Terminar la frase y convertir ahora",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "D" }],
 			callback: () => this.phraseAbort?.abort(),
 		});
 		this.addCommand({
