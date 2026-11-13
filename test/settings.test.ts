@@ -182,3 +182,26 @@ it("maps spoken math concepts to LaTeX symbols", () => {
 		expect(DEFAULT_CONVERSION_PROMPT_ES).toContain("- ");
 	});
 });
+
+describe("0.5.10 migrations", () => {
+	it("upgrades an untouched 0.5.9 prompt and context to the new defaults", async () => {
+		const { migrateSettings, DEFAULT_SETTINGS } = await import("../src/settings");
+		const s = migrateSettings({
+			conversionPrompt:
+				"Convierte un dictado matemático en español en notas de Obsidian con Markdown y LaTeX.\n\nReglas:",
+			transcriptionContext: "Dictado matemático en español: integral, derivada, sumatoria, raíz, fracción, límite, transformada de Laplace, fracciones parciales, alfa, beta, pi, infinito, subíndice, exponente, al cuadrado, tiende a, inversa, numerador, denominador.",
+		});
+		expect(s.conversionPrompt).toBe(DEFAULT_SETTINGS.conversionPrompt);
+		expect(s.transcriptionContext).toBe(DEFAULT_SETTINGS.transcriptionContext);
+	});
+
+	it("keeps a custom prompt and fills the new fields", async () => {
+		const { migrateSettings, DEFAULT_SETTINGS } = await import("../src/settings");
+		const s = migrateSettings({ conversionPrompt: "mi prompt custom" });
+		expect(s.conversionPrompt).toBe("mi prompt custom");
+		expect(s.glossary.length).toBeGreaterThan(0);
+		expect(s.improveEnabled).toBe(false);
+		expect(s.improveUrl).toContain("workers.dev");
+		void DEFAULT_SETTINGS;
+	});
+});

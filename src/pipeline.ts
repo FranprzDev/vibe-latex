@@ -1,5 +1,7 @@
 import { VoiceProvider } from "./providers";
 import { LatexVoiceSettings } from "./settings";
+import { applyGlossary, parseGlossaryLines } from "./glossary";
+import { formatCommandOnly, stripLeadingEllipsis } from "./text-clean";
 
 /**
  * Core dictation pipeline, decoupled from Obsidian so it can be tested
@@ -83,24 +85,68 @@ export async function dictatePipeline(
 	if (isBlankTranscript(t.text)) {
 		throw new Error("empty transcript");
 	}
-	opts.onTranscript?.(t.text);
+	const transcript = stripLeadingEllipsis(
+		applyGlossary(t.text.trim(), parseGlossaryLines(settings.glossary ?? [])),
+	);
+	const marker = formatCommandOnly(transcript);
+	if (marker !== null) {
+		opts.onTranscript?.(transcript);
+		return {
+			transcript,
+			output: marker,
+			usage: { audioSeconds: t.durationSeconds ?? opts.audioSeconds },
+		};
+	}
+	opts.onTranscript?.(transcript);
 	opts.onStep?.("converting");
-	const c = await provider.convertToLatex(t.text, {
+	const c = await provider.convertToLatex(transcript, {
 		systemPrompt: settings.conversionPrompt,
 		signal: opts.signal,
 	});
 	// "//" is the spoken paragraph-break marker.
 	const converted = c.text.replace(/\s*\/\/\s*/g, "\n\n").trim();
 	const output = applyOrderedListStyle(
-		!converted || looksLikeMetaResponse(converted) ? t.text.trim() : converted,
+		!converted || looksLikeMetaResponse(converted) ? transcript : converted,
 	);
 	return {
-		transcript: t.text,
-		output,
+		transcript,
+		output: await maybeImprove(output, settings),
 		usage: {
 			audioSeconds: t.durationSeconds ?? opts.audioSeconds,
 			inputTokens: c.inputTokens,
 			outputTokens: c.outputTokens,
 		},
 	};
+}
+
+export async function convertPlainText(
+	provider: VoiceProvider,
+	text: string,
+	settings: LatexVoiceSettings,
+): Promise<string> {
+	const c = await provider.convertToLatex(text.trim(), {
+		systemPrompt: settings.conversionPrompt,
+	});
+	const converted = c.text.replace(/\s*\/\/\s*/g, "\n\n").trim();
+	const output = applyOrderedListStyle(
+		!converted || looksLikeMetaResponse(converted) ? text.trim() : converted,
+	);
+	return maybeImprove(output, settings);
+}
+
+async function maybeImprove(text: string, settings: LatexVoiceSettings): Promise<string> {
+	if (!settings.improveEnabled || !settings.improveUrl?.trim()) return text;
+	try {
+		const res = await fetch(settings.improveUrl.trim(), {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ text }),
+			signal: AbortSignal.timeout(8_000),
+		});
+		if (!res.ok) return text;
+		const data = (await res.json()) as { text?: string };
+		return data.text?.trim() || text;
+	} catch {
+		return text;
+	}
 }

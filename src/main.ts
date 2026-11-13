@@ -1,5 +1,6 @@
 import {
 	App,
+	Editor,
 	MarkdownView,
 	Notice,
 	Plugin,
@@ -14,7 +15,8 @@ import {
 } from "./dictation-range";
 import { AudioRecorder, audioExtension } from "./recorder";
 import { createProvider } from "./providers";
-import { dictatePipeline } from "./pipeline";
+import { convertPlainText, dictatePipeline } from "./pipeline";
+import { cleanPdfText, trailingEllipsisLength } from "./text-clean";
 import { friendlyError } from "./errors";
 import { INSTALL_STEPS, InstallProgress, LocalModeManager, LocalStatus } from "./local/manager";
 import {
@@ -82,6 +84,16 @@ export default class LatexVoicePlugin extends Plugin {
 			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "R" }],
 			callback: () => void this.correctLastDictation(),
 		});
+		this.addCommand({
+			id: "convert-selection-to-latex",
+			name: "Convertir la selección a LaTeX",
+			editorCallback: (editor) => void this.convertSelectionToLatex(editor),
+		});
+		this.addCommand({
+			id: "paste-clipboard-as-latex",
+			name: "Pegar el portapapeles como LaTeX",
+			editorCallback: (editor) => void this.pasteClipboardAsLatex(editor),
+		});
 
 		this.addSettingTab(new LatexVoiceSettingTab(this.app, this));
 
@@ -90,6 +102,43 @@ export default class LatexVoicePlugin extends Plugin {
 				"Vibe LaTeX: pegá tu clave API de OpenAI en Ajustes → Vibe LaTeX, o configurá un endpoint local.",
 				8000,
 			);
+		}
+	}
+
+	private async convertSelectionToLatex(editor: Editor): Promise<void> {
+		const selection = editor.getSelection();
+		if (!selection.trim()) {
+			new Notice("Vibe LaTeX: seleccioná el texto a convertir.");
+			return;
+		}
+		new Notice("Vibe LaTeX: convirtiendo la selección…");
+		try {
+			const output = await convertPlainText(createProvider(this.settings), selection, this.settings);
+			editor.replaceSelection(output);
+		} catch (e) {
+			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
+		}
+	}
+
+	private async pasteClipboardAsLatex(editor: Editor): Promise<void> {
+		let raw = "";
+		try {
+			raw = await navigator.clipboard.readText();
+		} catch {
+			new Notice("Vibe LaTeX: no pude leer el portapapeles.");
+			return;
+		}
+		const cleaned = cleanPdfText(raw);
+		if (!cleaned) {
+			new Notice("Vibe LaTeX: el portapapeles está vacío.");
+			return;
+		}
+		new Notice("Vibe LaTeX: convirtiendo el portapapeles…");
+		try {
+			const output = await convertPlainText(createProvider(this.settings), cleaned, this.settings);
+			editor.replaceSelection(output);
+		} catch (e) {
+			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
 		}
 	}
 
@@ -283,8 +332,17 @@ export default class LatexVoicePlugin extends Plugin {
 							} else {
 								const from = editor.getCursor("from");
 								const to = editor.getCursor("to");
-								const start = editor.posToOffset(from);
-								editor.replaceRange(text, from, to);
+								let start = editor.posToOffset(from);
+								if (start === editor.posToOffset(to)) {
+									const cut = trailingEllipsisLength(
+										editor.getValue().slice(Math.max(0, start - 30), start),
+									);
+									if (cut > 0) {
+										editor.replaceRange("", editor.offsetToPos(start - cut), from);
+										start -= cut;
+									}
+								}
+								editor.replaceRange(text, editor.offsetToPos(start), editor.offsetToPos(start));
 								this.setLastDictation({
 									filePath: file.path,
 									from: start,
@@ -714,6 +772,7 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		this.renderServerGroup(content, status);
 		this.renderProviderGroup(content);
 		this.renderPromptGroup(content);
+		this.renderImproveGroup(content);
 		this.renderRecordingGroup(content);
 		this.renderUsageGroup(content);
 	}
@@ -903,6 +962,49 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 				t.inputEl.rows = 10;
 				t.inputEl.cols = 40;
 			});
+	}
+
+	private renderImproveGroup(container: HTMLElement): void {
+		this.subHeader(container, "Corrección de términos");
+		const s = this.plugin.settings;
+
+		new Setting(container)
+			.setName("Glosario")
+			.setDesc(
+				"Correcciones de transcripción, una por línea: mal = bien. Se aplican antes de convertir.",
+			)
+			.addTextArea((t) => {
+				t.inputEl.rows = 4;
+				t.inputEl.style.width = "100%";
+				t.setPlaceholder("route hardware = Routh-Hurwitz");
+				t.setValue(s.glossary.join("\n"));
+				t.onChange(async (v) => {
+					s.glossary = v.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(container)
+			.setName("Revisar con la nube")
+			.setDesc(
+				"Envía cada resultado a un worker gratuito que corrige términos técnicos mal transcritos sin agregar contenido. Si falla, se usa el texto original.",
+			)
+			.addToggle((t) =>
+				t.setValue(s.improveEnabled).onChange(async (v) => {
+					s.improveEnabled = v;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(container)
+			.setName("URL del worker")
+			.setDesc("Endpoint del paso de revisión.")
+			.addText((t) =>
+				t.setValue(s.improveUrl).onChange(async (v) => {
+					s.improveUrl = v.trim();
+					await this.plugin.saveSettings();
+				}),
+			);
 	}
 
 	private renderRecordingGroup(container: HTMLElement): void {
