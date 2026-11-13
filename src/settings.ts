@@ -40,6 +40,7 @@ export interface LatexVoiceSettings {
 	graceMs: number;
 	sttPort: number;
 	llmPort: number;
+	localLlmApiKey: string;
 	autoStartLocal: boolean;
 	usage: {
 		audioSeconds: number;
@@ -70,6 +71,7 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	graceMs: 10_000,
 	sttPort: 10000,
 	llmPort: 8082,
+	localLlmApiKey: "",
 	autoStartLocal: true,
 	usage: { audioSeconds: 0, inputTokens: 0, outputTokens: 0, requests: 0 },
 	lastDictation: null,

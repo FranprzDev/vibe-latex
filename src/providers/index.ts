@@ -11,6 +11,7 @@ export function createProvider(settings: LatexVoiceSettings): VoiceProvider {
 				conversionBaseUrl: settings.conversionBaseUrl,
 				transcriptionModel: settings.transcriptionModel,
 				conversionModel: settings.conversionModel,
+				apiKey: settings.localLlmApiKey,
 			});
 		case "openai":
 		default:

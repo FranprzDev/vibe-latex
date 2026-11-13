@@ -13,6 +13,7 @@ export interface LocalProviderConfig {
 	conversionBaseUrl: string;
 	transcriptionModel: string;
 	conversionModel: string;
+	apiKey?: string;
 }
 
 interface TranscriptionResponse {
@@ -40,6 +41,10 @@ export class LocalProvider implements VoiceProvider {
 		return this.config.conversionBaseUrl.replace(/\/+$/, "");
 	}
 
+	private authHeaders(): Record<string, string> {
+		return this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : {};
+	}
+
 	async transcribe(audio: Blob, filename: string, opts: TranscribeOptions): Promise<TranscriptionResult> {
 		const wav = isWav(audio, filename) ? audio : await blobToWav(audio);
 		const wavName = filename.replace(/\.[^.]+$/, "") + ".wav";
@@ -55,6 +60,7 @@ export class LocalProvider implements VoiceProvider {
 
 		const res = await fetch(`${this.transcriptionUrl}/inference`, {
 			method: "POST",
+			headers: this.authHeaders(),
 			body: form,
 			signal: anySignal([AbortSignal.timeout(60_000), opts.signal]),
 		});
@@ -69,7 +75,7 @@ export class LocalProvider implements VoiceProvider {
 	async convertToLatex(transcript: string, opts: ConvertOptions): Promise<ConvertResult> {
 		const res = await fetch(`${this.conversionUrl}/chat/completions`, {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: { "Content-Type": "application/json", ...this.authHeaders() },
 			body: JSON.stringify({
 				model: this.config.conversionModel,
 				messages: [
