@@ -1,27 +1,29 @@
-interface AudioContextLike {
-	decodeAudioData(data: ArrayBuffer): Promise<AudioBuffer>;
-	close(): Promise<void>;
-}
-
 interface OfflineAudioContextLike {
+	decodeAudioData(data: ArrayBuffer): Promise<AudioBuffer>;
 	createBufferSource(): AudioBufferSourceNode;
 	startRendering(): Promise<AudioBuffer>;
 	destination: AudioDestinationNode;
 }
 
-function audioContextCtor(): (new () => AudioContextLike) | null {
+type OfflineAudioContextCtor = new (
+	channels: number,
+	frames: number,
+	sampleRate: number,
+) => OfflineAudioContextLike;
+
+const DECODE_TIMEOUT_MS = 30_000;
+
+function offlineAudioContextCtor(): OfflineAudioContextCtor | null {
 	const g = globalThis as Record<string, unknown>;
-	return (g.AudioContext ?? g.webkitAudioContext) as (new () => AudioContextLike) | null ?? null;
+	return (g.OfflineAudioContext ?? g.webkitOfflineAudioContext) as OfflineAudioContextCtor | null ?? null;
 }
 
-function offlineAudioContextCtor():
-	| (new (channels: number, frames: number, sampleRate: number) => OfflineAudioContextLike)
-	| null {
-	const g = globalThis as Record<string, unknown>;
-	return (g.OfflineAudioContext ?? g.webkitOfflineAudioContext) as
-		| (new (channels: number, frames: number, sampleRate: number) => OfflineAudioContextLike)
-		| null
-		?? null;
+function withDecodeTimeout<T>(work: Promise<T>): Promise<T> {
+	let timer: ReturnType<typeof setTimeout>;
+	const timeout = new Promise<never>((_resolve, reject) => {
+		timer = setTimeout(() => reject(new Error("audio decode timeout")), DECODE_TIMEOUT_MS);
+	});
+	return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
 }
 
 function encodeWavPcm16(samples: Float32Array, sampleRate: number): ArrayBuffer {
@@ -56,20 +58,18 @@ export function isWav(blob: Blob, filename: string): boolean {
 	return blob.type.includes("wav") || filename.toLowerCase().endsWith(".wav");
 }
 
-export async function blobToWav(blob: Blob, targetSampleRate = 16_000): Promise<Blob> {
-	const AC = audioContextCtor();
+export function blobToWav(blob: Blob, targetSampleRate = 16_000): Promise<Blob> {
+	return withDecodeTimeout(convertToWav(blob, targetSampleRate));
+}
+
+async function convertToWav(blob: Blob, targetSampleRate: number): Promise<Blob> {
 	const OfflineAC = offlineAudioContextCtor();
-	if (!AC || !OfflineAC) {
+	if (!OfflineAC) {
 		throw new Error("Web Audio no está disponible para convertir el audio a WAV.");
 	}
 	const arrayBuffer = await blob.arrayBuffer();
-	const ctx = new AC();
-	let decoded: AudioBuffer;
-	try {
-		decoded = await ctx.decodeAudioData(arrayBuffer);
-	} finally {
-		void ctx.close();
-	}
+	const decoding = new OfflineAC(1, 1, 44_100);
+	const decoded = await decoding.decodeAudioData(arrayBuffer);
 	const frames = Math.max(1, Math.ceil(decoded.duration * targetSampleRate));
 	const offline = new OfflineAC(1, frames, targetSampleRate);
 	const source = offline.createBufferSource();

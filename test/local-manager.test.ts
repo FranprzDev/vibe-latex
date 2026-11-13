@@ -24,7 +24,13 @@ vi.mock("child_process", () => ({
 	),
 }));
 
-const STT_BASE = "https://github.com/FranprzDev/vibe-latex/releases/download/stt-v1.9.5";
+vi.mock("obsidian", () => ({
+	Notice: class {
+		constructor(_message: string) {}
+	},
+}));
+
+const STT_BASE = "https://github.com/FranprzDev/vibe-stt-server/releases/download/stt-v1.9.5";
 const LLAMA_BASE = "https://github.com/ggml-org/llama.cpp/releases/download/b12340";
 
 describe("resolveAssets", () => {
@@ -249,6 +255,44 @@ describe("LocalModeManager.install", () => {
 			await expect(manager.install(undefined, assets)).rejects.toThrow(
 				"URL de descarga no permitida: http://example.com/stt.tar.gz",
 			);
+		} finally {
+			await fs.promises.rm(basePath, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("LocalModeManager.ready", () => {
+	it("reports both servers ready when they respond", async () => {
+		const basePath = await fs.promises.mkdtemp(path.join(os.tmpdir(), "vibe-latex-"));
+		const { server, port } = await startServer();
+		try {
+			const manager = new LocalModeManager({
+				basePath,
+				pluginDir: "vibe-latex",
+				sttPort: port,
+				llmPort: port,
+				llmApiKey: "test-key",
+			});
+			expect(await manager.ready()).toEqual({ stt: true, llm: true });
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+			await fs.promises.rm(basePath, { recursive: true, force: true });
+		}
+	});
+
+	it("reports a server that does not respond as not ready", async () => {
+		const basePath = await fs.promises.mkdtemp(path.join(os.tmpdir(), "vibe-latex-"));
+		const { server, port } = await startServer();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+		try {
+			const manager = new LocalModeManager({
+				basePath,
+				pluginDir: "vibe-latex",
+				sttPort: port,
+				llmPort: port,
+				llmApiKey: "test-key",
+			});
+			expect(await manager.ready()).toEqual({ stt: false, llm: false });
 		} finally {
 			await fs.promises.rm(basePath, { recursive: true, force: true });
 		}

@@ -20,6 +20,26 @@ describe("friendlyError", () => {
 			"conexión",
 		);
 	});
+	it("maps failed-to-fetch to the local server message", () => {
+		expect(friendlyError(new Error("TypeError: Failed to fetch"))).toContain(
+			"No responde el servidor",
+		);
+	});
+	it("maps load failed to the local server message", () => {
+		expect(friendlyError(new Error("Load failed"))).toContain(
+			"No responde el servidor",
+		);
+	});
+	it("maps timeouts to the loading-model message", () => {
+		expect(friendlyError(new Error("The operation was aborted due to signal timed out"))).toContain(
+			"Tardó demasiado",
+		);
+	});
+	it("maps the audio decode timeout to the microphone message", () => {
+		expect(friendlyError(new Error("audio decode timeout"))).toContain(
+			"decodificar el audio",
+		);
+	});
 	it("maps mic permission errors", () => {
 		expect(
 			friendlyError(new Error("NotAllowedError: permission denied")),
