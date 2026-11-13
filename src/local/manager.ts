@@ -6,6 +6,13 @@ import { get as httpsGet } from "https";
 import { Notice } from "obsidian";
 import * as fs from "fs";
 import * as path from "path";
+import {
+	candidateBinDirs,
+	candidateModelDirs,
+	currentEnvironment,
+	findExecutable,
+	findModel,
+} from "./detect";
 
 export interface LocalModeManagerOptions {
 	basePath: string;
@@ -13,6 +20,14 @@ export interface LocalModeManagerOptions {
 	sttPort: number;
 	llmPort: number;
 	llmApiKey: string;
+	paths?: Partial<ExternalPaths>;
+}
+
+export interface ExternalPaths {
+	whisperServerPath: string;
+	llamaServerPath: string;
+	whisperModelPath: string;
+	llmModelPath: string;
 }
 
 export interface LocalStatus {
@@ -233,8 +248,15 @@ export class LocalModeManager {
 	private llamaDir: string;
 	private modelsDir: string;
 	private logsDir: string;
+	private externalPaths: ExternalPaths;
 
 	constructor(options: LocalModeManagerOptions) {
+		this.externalPaths = {
+			whisperServerPath: options.paths?.whisperServerPath ?? "",
+			llamaServerPath: options.paths?.llamaServerPath ?? "",
+			whisperModelPath: options.paths?.whisperModelPath ?? "",
+			llmModelPath: options.paths?.llmModelPath ?? "",
+		};
 		this.sttPort = options.sttPort;
 		this.llmPort = options.llmPort;
 		this.llmApiKey = options.llmApiKey;
@@ -249,16 +271,55 @@ export class LocalModeManager {
 		return !!child && child.exitCode === null && child.signalCode === null;
 	}
 
+	private async resolveSttBinary(): Promise<string | null> {
+		const manual = this.externalPaths.whisperServerPath;
+		if (manual && (await exists(manual))) return manual;
+		const local = await findFile(this.sttDir, isWhisperServer);
+		if (local) return local;
+		return findExecutable(candidateBinDirs(currentEnvironment()), [
+			"whisper-server",
+			"whisper-server.exe",
+		]);
+	}
+
+	private async resolveLlamaBinary(): Promise<string | null> {
+		const manual = this.externalPaths.llamaServerPath;
+		if (manual && (await exists(manual))) return manual;
+		const local = await findFile(this.llamaDir, isLlamaServer);
+		if (local) return local;
+		return findExecutable(candidateBinDirs(currentEnvironment()), [
+			"llama-server",
+			"llama-server.exe",
+		]);
+	}
+
+	private async modelSearchDirs(): Promise<string[]> {
+		const env = currentEnvironment();
+		const bins = [await this.resolveSttBinary(), await this.resolveLlamaBinary()];
+		const binDirs = bins.filter((b): b is string => !!b).map((b) => path.dirname(b));
+		return candidateModelDirs(env, [...binDirs, this.modelsDir]);
+	}
+
+	private async resolveWhisperModel(): Promise<string | null> {
+		const manual = this.externalPaths.whisperModelPath;
+		if (manual && (await exists(manual))) return manual;
+		return findModel(await this.modelSearchDirs(), WHISPER_MODEL.fileName);
+	}
+
+	private async resolveLlmModel(): Promise<string | null> {
+		const manual = this.externalPaths.llmModelPath;
+		if (manual && (await exists(manual))) return manual;
+		return findModel(await this.modelSearchDirs(), LLM_MODEL.fileName);
+	}
+
 	async status(): Promise<LocalStatus> {
 		const missing: string[] = [];
-		const sttBin = await findFile(this.sttDir, isWhisperServer);
-		if (!sttBin) missing.push("stt-server");
-		const llamaBin = await findFile(this.llamaDir, isLlamaServer);
-		if (!llamaBin) missing.push("llama-server");
-		if (!(await exists(path.join(this.modelsDir, WHISPER_MODEL.fileName)))) {
+		if (!(await this.resolveSttBinary())) missing.push("stt-server");
+		if (!(await this.resolveLlamaBinary())) missing.push("llama-server");
+		if (!(await this.resolveWhisperModel())) {
 			missing.push("whisper-model");
 		}
-		if (!(await exists(path.join(this.modelsDir, LLM_MODEL.fileName)))) {
+		if (!(await this.resolveLlmModel())) {
 			missing.push("llm-model");
 		}
 		return {
@@ -370,25 +431,33 @@ export class LocalModeManager {
 
 		let step = "stt-server";
 		try {
-			step = "stt-server";
-			const sttArchive = await this.download(step, assets.stt, tmpDir, onProgress);
-			await fs.promises.mkdir(this.sttDir, { recursive: true });
-			onProgress?.({ step, phase: "extract", downloadedBytes: 0, totalBytes: null });
-			await runTar(sttArchive, this.sttDir);
+			if (!(await this.resolveSttBinary())) {
+				step = "stt-server";
+				const sttArchive = await this.download(step, assets.stt, tmpDir, onProgress);
+				await fs.promises.mkdir(this.sttDir, { recursive: true });
+				onProgress?.({ step, phase: "extract", downloadedBytes: 0, totalBytes: null });
+				await runTar(sttArchive, this.sttDir);
+			}
 
-			step = "llama-server";
-			const llamaArchive = await this.download(step, assets.llama, tmpDir, onProgress);
-			await fs.promises.mkdir(this.llamaDir, { recursive: true });
-			onProgress?.({ step, phase: "extract", downloadedBytes: 0, totalBytes: null });
-			await runTar(llamaArchive, this.llamaDir);
+			if (!(await this.resolveLlamaBinary())) {
+				step = "llama-server";
+				const llamaArchive = await this.download(step, assets.llama, tmpDir, onProgress);
+				await fs.promises.mkdir(this.llamaDir, { recursive: true });
+				onProgress?.({ step, phase: "extract", downloadedBytes: 0, totalBytes: null });
+				await runTar(llamaArchive, this.llamaDir);
+			}
 
-			step = "whisper-model";
-			const whisperFile = await this.download(step, assets.whisperModel, tmpDir, onProgress);
-			await fs.promises.rename(whisperFile, path.join(this.modelsDir, assets.whisperModel.fileName));
+			if (!(await this.resolveWhisperModel())) {
+				step = "whisper-model";
+				const whisperFile = await this.download(step, assets.whisperModel, tmpDir, onProgress);
+				await fs.promises.rename(whisperFile, path.join(this.modelsDir, assets.whisperModel.fileName));
+			}
 
-			step = "llm-model";
-			const llmFile = await this.download(step, assets.llmModel, tmpDir, onProgress);
-			await fs.promises.rename(llmFile, path.join(this.modelsDir, assets.llmModel.fileName));
+			if (!(await this.resolveLlmModel())) {
+				step = "llm-model";
+				const llmFile = await this.download(step, assets.llmModel, tmpDir, onProgress);
+				await fs.promises.rename(llmFile, path.join(this.modelsDir, assets.llmModel.fileName));
+			}
 
 			if (process.platform !== "win32") {
 				const sttBin = await findFile(this.sttDir, isWhisperServer);
@@ -398,8 +467,7 @@ export class LocalModeManager {
 			}
 		} catch (error) {
 			await fs.promises.rm(tmpDir, { recursive: true, force: true });
-			if (!(await exists(path.join(this.modelsDir, assets.whisperModel.fileName))) ||
-				!(await exists(path.join(this.modelsDir, assets.llmModel.fileName)))) {
+			if (!(await this.resolveWhisperModel()) || !(await this.resolveLlmModel())) {
 				await fs.promises.rm(path.join(this.localRoot, "bin"), { recursive: true, force: true });
 			}
 			const message = error instanceof Error ? error.message : String(error);
@@ -479,13 +547,13 @@ export class LocalModeManager {
 	async start(): Promise<void> {
 		if (this.isAlive(this.sttProcess) && this.isAlive(this.llmProcess)) return;
 
-		const sttBin = await findFile(this.sttDir, isWhisperServer);
-		const llamaBin = await findFile(this.llamaDir, isLlamaServer);
-		if (!sttBin || !llamaBin) {
+		const sttBin = await this.resolveSttBinary();
+		const llamaBin = await this.resolveLlamaBinary();
+		const whisperModelPath = await this.resolveWhisperModel();
+		const llmModelPath = await this.resolveLlmModel();
+		if (!sttBin || !llamaBin || !whisperModelPath || !llmModelPath) {
 			throw new Error("El modo local no está instalado por completo.");
 		}
-		const whisperModelPath = path.join(this.modelsDir, WHISPER_MODEL.fileName);
-		const llmModelPath = path.join(this.modelsDir, LLM_MODEL.fileName);
 
 		await fs.promises.mkdir(this.logsDir, { recursive: true });
 

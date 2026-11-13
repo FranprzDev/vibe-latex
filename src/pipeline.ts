@@ -1,6 +1,5 @@
 import { VoiceProvider } from "./providers";
 import { LatexVoiceSettings } from "./settings";
-import { applyGlossary, parseGlossaryLines } from "./glossary";
 import { formatCommandOnly, stripLeadingEllipsis } from "./text-clean";
 
 /**
@@ -85,9 +84,7 @@ export async function dictatePipeline(
 	if (isBlankTranscript(t.text)) {
 		throw new Error("empty transcript");
 	}
-	const transcript = stripLeadingEllipsis(
-		applyGlossary(t.text.trim(), parseGlossaryLines(settings.glossary ?? [])),
-	);
+	const transcript = stripLeadingEllipsis(t.text.trim());
 	const marker = formatCommandOnly(transcript);
 	if (marker !== null) {
 		opts.onTranscript?.(transcript);
@@ -132,6 +129,26 @@ export async function convertPlainText(
 		!converted || looksLikeMetaResponse(converted) ? text.trim() : converted,
 	);
 	return maybeImprove(output, settings);
+}
+
+export async function convertImageToLatex(
+	imageBase64: string,
+	settings: LatexVoiceSettings,
+): Promise<string | null> {
+	if (!settings.improveEnabled || !settings.improveUrl?.trim()) return null;
+	try {
+		const res = await fetch(`${settings.improveUrl.trim()}/vision`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ image: imageBase64 }),
+			signal: AbortSignal.timeout(30_000),
+		});
+		if (!res.ok) return null;
+		const data = (await res.json()) as { text?: string };
+		return data.text?.trim() || null;
+	} catch {
+		return null;
+	}
 }
 
 async function maybeImprove(text: string, settings: LatexVoiceSettings): Promise<string> {

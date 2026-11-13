@@ -203,12 +203,12 @@ describe("0.5.10 guards", () => {
 		expect(converted).toBe(false);
 	});
 
-	it("applies the glossary and strips leading ellipsis before converting", async () => {
+	it("strips leading ellipsis before converting", async () => {
 		let seen = "";
 		const provider: VoiceProvider = {
 			...fakeProvider,
 			async transcribe() {
-				return { text: "...el criterio de route hardware", durationSeconds: 1 };
+				return { text: "...sea bastante difícil", durationSeconds: 1 };
 			},
 			async convertToLatex(t, o) {
 				seen = t;
@@ -216,7 +216,7 @@ describe("0.5.10 guards", () => {
 			},
 		};
 		await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
-		expect(seen).toBe("el criterio de Routh-Hurwitz");
+		expect(seen).toBe("sea bastante difícil");
 	});
 
 	it("falls back to the raw transcript when conversion returns a meta message", async () => {
@@ -231,5 +231,37 @@ describe("0.5.10 guards", () => {
 		};
 		const { output } = await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
 		expect(output).toBe("ruido ambiente");
+	});
+});
+
+describe("convertImageToLatex", () => {
+	it("posts the image to the worker vision route", async () => {
+		const { convertImageToLatex } = await import("../src/pipeline");
+		let called = "";
+		vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+			called = url;
+			return new Response(JSON.stringify({ text: "$$P(s)$$" }), { status: 200 });
+		}));
+		try {
+			const out = await convertImageToLatex("aGVsbG8=", {
+				...DEFAULT_SETTINGS,
+				improveEnabled: true,
+			});
+			expect(out).toBe("$$P(s)$$");
+			expect(called).toBe(`${DEFAULT_SETTINGS.improveUrl}/vision`);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("returns null when the toggle is off or the worker fails", async () => {
+		const { convertImageToLatex } = await import("../src/pipeline");
+		expect(await convertImageToLatex("aGVsbG8=", DEFAULT_SETTINGS)).toBeNull();
+		vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("down"); }));
+		try {
+			expect(await convertImageToLatex("aGVsbG8=", { ...DEFAULT_SETTINGS, improveEnabled: true })).toBeNull();
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });

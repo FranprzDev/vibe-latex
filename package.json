@@ -1,12 +1,12 @@
 {
 	"name": "vibe-latex",
-	"version": "0.5.10",
+	"version": "0.5.11",
 	"description": "Dictate Spanish equations by voice and convert them into Markdown and LaTeX.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "node esbuild.config.mjs production",
-		"test": "vitest run test/openai.test.ts test/local-provider.test.ts test/local-manager.test.ts test/pipeline.test.ts test/recorder.test.ts test/errors.test.ts test/settings.test.ts test/dictation-range.test.ts test/abort.test.ts test/plugin.test.ts test/wav.test.ts test/timeouts.test.ts test/fixtures.test.ts test/glossary.test.ts test/text-clean.test.ts test/e2e.test.ts",
+		"test": "vitest run test/openai.test.ts test/local-provider.test.ts test/local-manager.test.ts test/pipeline.test.ts test/recorder.test.ts test/errors.test.ts test/settings.test.ts test/dictation-range.test.ts test/abort.test.ts test/plugin.test.ts test/wav.test.ts test/timeouts.test.ts test/fixtures.test.ts test/text-clean.test.ts test/detect.test.ts test/e2e.test.ts",
 		"test:e2e": "vitest run test/e2e.test.ts",
 		"test:obsidian": "vitest run test/obsidian.e2e.test.ts"
 	},
