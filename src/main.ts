@@ -194,6 +194,8 @@ export default class LatexVoicePlugin extends Plugin {
 				if (!blob || blob.size < 800) continue;
 
 				this.updateStatus("procesando...");
+				const useStreaming = this.settings.streamingInsert && !replaceTarget;
+				const streaming: { range: LastDictation | null } = { range: null };
 				try {
 					const { output, usage } = await dictatePipeline(
 						provider,
@@ -205,6 +207,24 @@ export default class LatexVoicePlugin extends Plugin {
 							signal,
 							onStep: (step) =>
 								this.updateStatus(step === "transcribing" ? "transcribiendo..." : "convirtiendo..."),
+							onTranscript: useStreaming
+								? (transcript) => {
+									const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+									const activeFile = this.app.workspace.getActiveFile();
+									if (!activeView || !activeFile) return;
+									const activeEditor = activeView.editor;
+									const cursor = activeEditor.getCursor();
+									const from = activeEditor.posToOffset(cursor);
+									activeEditor.replaceRange(transcript, cursor, cursor);
+									activeEditor.setCursor(activeEditor.offsetToPos(from + transcript.length));
+									streaming.range = {
+										filePath: activeFile.path,
+										from,
+										to: from + transcript.length,
+										text: transcript,
+									};
+								}
+								: undefined,
 						},
 					);
 					await this.recordUsage(usage);
@@ -216,39 +236,63 @@ export default class LatexVoicePlugin extends Plugin {
 					}
 					if (view && file) {
 						const editor = view.editor;
-						const text = dictationReplacementText(
-							output,
-							editor.getSelection(),
-							replaceTarget?.text,
-						);
-						if (replaceTarget) {
-							const range = verifiedDictationRange(editor.getValue(), replaceTarget);
-							if (file.path !== replaceTarget.filePath || !range) {
-								new Notice("La frase cambió durante la corrección; no la reemplacé.");
-								break;
-							}
-							const from = editor.offsetToPos(range.from);
-							const to = editor.offsetToPos(range.to);
-							editor.replaceRange(text, from, to);
+						const streamed = streaming.range;
+						const partial = streamed &&
+							file.path === streamed.filePath &&
+							editor.getValue().slice(streamed.from, streamed.to) === streamed.text
+							? streamed
+							: null;
+						if (partial) {
+							editor.replaceRange(
+								output,
+								editor.offsetToPos(partial.from),
+								editor.offsetToPos(partial.to),
+							);
 							this.setLastDictation({
 								filePath: file.path,
-								from: range.from,
-								to: range.from + text.length,
-								text,
+								from: partial.from,
+								to: partial.from + output.length,
+								text: output,
 							});
-							editor.setCursor(editor.offsetToPos(range.from + text.length));
+							editor.setCursor(editor.offsetToPos(partial.from + output.length));
 						} else {
-							const from = editor.getCursor("from");
-							const to = editor.getCursor("to");
-							const start = editor.posToOffset(from);
-							editor.replaceRange(text, from, to);
-							this.setLastDictation({
-								filePath: file.path,
-								from: start,
-								to: start + text.length,
-								text,
-							});
-							editor.setCursor(editor.offsetToPos(start + text.length));
+							if (streamed) {
+								new Notice("Vibe LaTeX: inserté la conversión al final (el texto parcial cambió).");
+							}
+							const text = dictationReplacementText(
+								output,
+								editor.getSelection(),
+								replaceTarget?.text,
+							);
+							if (replaceTarget) {
+								const range = verifiedDictationRange(editor.getValue(), replaceTarget);
+								if (file.path !== replaceTarget.filePath || !range) {
+									new Notice("La frase cambió durante la corrección; no la reemplacé.");
+									break;
+								}
+								const from = editor.offsetToPos(range.from);
+								const to = editor.offsetToPos(range.to);
+								editor.replaceRange(text, from, to);
+								this.setLastDictation({
+									filePath: file.path,
+									from: range.from,
+									to: range.from + text.length,
+									text,
+								});
+								editor.setCursor(editor.offsetToPos(range.from + text.length));
+							} else {
+								const from = editor.getCursor("from");
+								const to = editor.getCursor("to");
+								const start = editor.posToOffset(from);
+								editor.replaceRange(text, from, to);
+								this.setLastDictation({
+									filePath: file.path,
+									from: start,
+									to: start + text.length,
+									text,
+								});
+								editor.setCursor(editor.offsetToPos(start + text.length));
+							}
 						}
 					}
 					if (this.settings.saveAudio) {
@@ -344,9 +388,22 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+		this.renderStreamingToggle(containerEl);
 		this.localSection = containerEl.createDiv();
 		this.advancedSection = containerEl.createDiv();
 		void this.renderAll();
+	}
+
+	private renderStreamingToggle(container: HTMLElement): void {
+		new Setting(container)
+			.setName("Inserción progresiva")
+			.setDesc("Inserta el texto transcrito al instante y lo reemplaza con el LaTeX convertido. Si falla, desactivala acá.")
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.streamingInsert).onChange(async (v) => {
+					this.plugin.settings.streamingInsert = v;
+					await this.plugin.saveSettings();
+				})
+			);
 	}
 
 	private async renderAll(): Promise<void> {

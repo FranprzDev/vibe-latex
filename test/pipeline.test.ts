@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { dictatePipeline } from "../src/pipeline";
 import { VoiceProvider } from "../src/providers";
 import { DEFAULT_SETTINGS } from "../src/settings";
@@ -82,6 +82,44 @@ describe("dictatePipeline", () => {
 			audioSeconds: 7,
 		});
 		expect(usage.audioSeconds).toBe(7);
+	});
+
+	it("reports the raw transcript before conversion completes", async () => {
+		const seen: string[] = [];
+		const p: VoiceProvider = {
+			...fakeProvider,
+			transcribe: async () => {
+				seen.push("transcribe");
+				return { text: "hola mundo" };
+			},
+			convertToLatex: async () => {
+				seen.push("convert");
+				return { text: "c" };
+			},
+		};
+		let got: string | undefined;
+		await dictatePipeline(p, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS, {
+			onTranscript: (transcript) => {
+				got = transcript;
+				seen.push("transcript");
+			},
+		});
+		expect(got).toBe("hola mundo");
+		expect(seen).toEqual(["transcribe", "transcript", "convert"]);
+	});
+
+	it("does not report a transcript when transcription fails", async () => {
+		const failing: VoiceProvider = {
+			...fakeProvider,
+			transcribe: async () => {
+				throw new Error("mic dead");
+			},
+		};
+		const onTranscript = vi.fn();
+		await expect(
+			dictatePipeline(failing, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS, { onTranscript }),
+		).rejects.toThrow("mic dead");
+		expect(onTranscript).not.toHaveBeenCalled();
 	});
 
 	it("reports each stage through onStep before it runs", async () => {
