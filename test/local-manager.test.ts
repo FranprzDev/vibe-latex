@@ -8,6 +8,7 @@ import * as path from "path";
 import {
 	buildLlamaArgs,
 	buildSttArgs,
+	buildVlArgs,
 	INSTALL_STEPS,
 	LocalModeManager,
 	resolveAssets,
@@ -321,6 +322,19 @@ describe("spawn arguments", () => {
 			"--port", "8082",
 			"--api-key", "secret",
 			"-c", "4096",
+		]);
+	});
+
+	it("builds the llama.cpp vision arguments with the mmproj and jinja", () => {
+		expect(buildVlArgs("/models/vl.gguf", "/models/mmproj.gguf", 8083, "secret")).toEqual([
+			"-m", "/models/vl.gguf",
+			"--mmproj", "/models/mmproj.gguf",
+			"--alias", "lfm-vl",
+			"--host", "127.0.0.1",
+			"--port", "8083",
+			"--api-key", "secret",
+			"-c", "4096",
+			"--jinja",
 		]);
 	});
 });

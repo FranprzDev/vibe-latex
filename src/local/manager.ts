@@ -146,6 +146,43 @@ export function resolveAssets(platform: string, arch: string): LocalAssets | nul
 	return { stt, llama, whisperModel: WHISPER_MODEL, llmModel: LLM_MODEL };
 }
 
+export type VlModelSize = "450m" | "1.6b";
+
+interface VlAssets {
+	model: Asset;
+	mmproj: Asset;
+	totalBytes: number;
+}
+
+const VL_MODELS: Record<VlModelSize, VlAssets> = {
+	"450m": {
+		model: {
+			url: "https://huggingface.co/LiquidAI/LFM2.5-VL-450M-GGUF/resolve/main/LFM2.5-VL-450M-Q4_0.gguf",
+			fileName: "LFM2.5-VL-450M-Q4_0.gguf",
+		},
+		mmproj: {
+			url: "https://huggingface.co/LiquidAI/LFM2.5-VL-450M-GGUF/resolve/main/mmproj-LFM2.5-VL-450m-Q8_0.gguf",
+			fileName: "mmproj-LFM2.5-VL-450m-Q8_0.gguf",
+		},
+		totalBytes: 322_000_000,
+	},
+	"1.6b": {
+		model: {
+			url: "https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B-GGUF/resolve/main/LFM2.5-VL-1.6B-Q4_0.gguf",
+			fileName: "LFM2.5-VL-1.6B-Q4_0.gguf",
+		},
+		mmproj: {
+			url: "https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B-GGUF/resolve/main/mmproj-LFM2.5-VL-1.6b-Q8_0.gguf",
+			fileName: "mmproj-LFM2.5-VL-1.6b-Q8_0.gguf",
+		},
+		totalBytes: 1_279_000_000,
+	},
+};
+
+export function vlDownloadBytes(size: VlModelSize): number {
+	return VL_MODELS[size].totalBytes;
+}
+
 export function buildSttArgs(modelPath: string, port: number): string[] {
 	return [
 		"-m", modelPath,
@@ -162,6 +199,24 @@ export function buildLlamaArgs(modelPath: string, port: number, apiKey: string):
 		"--port", String(port),
 		"--api-key", apiKey,
 		"-c", "4096",
+	];
+}
+
+export function buildVlArgs(
+	modelPath: string,
+	mmprojPath: string,
+	port: number,
+	apiKey: string,
+): string[] {
+	return [
+		"-m", modelPath,
+		"--mmproj", mmprojPath,
+		"--alias", "lfm-vl",
+		"--host", "127.0.0.1",
+		"--port", String(port),
+		"--api-key", apiKey,
+		"-c", "4096",
+		"--jinja",
 	];
 }
 
@@ -240,8 +295,10 @@ function runTar(archive: string, destDir: string): Promise<void> {
 export class LocalModeManager {
 	private sttProcess: ChildProcess | null = null;
 	private llmProcess: ChildProcess | null = null;
+	private vlProcess: ChildProcess | null = null;
 	private sttPort: number;
 	private llmPort: number;
+	private vlPort = 8083;
 	private llmApiKey: string;
 	private localRoot: string;
 	private sttDir: string;
@@ -476,6 +533,91 @@ export class LocalModeManager {
 		await fs.promises.rm(tmpDir, { recursive: true, force: true });
 	}
 
+	private async resolveVlFile(fileName: string): Promise<string | null> {
+		return findModel(await this.modelSearchDirs(), fileName);
+	}
+
+	async vlInstalled(size: VlModelSize): Promise<boolean> {
+		const assets = VL_MODELS[size];
+		const model = await this.resolveVlFile(assets.model.fileName);
+		const mmproj = await this.resolveVlFile(assets.mmproj.fileName);
+		return !!model && !!mmproj;
+	}
+
+	async installVl(size: VlModelSize, onProgress?: (p: InstallProgress) => void): Promise<void> {
+		const assets = VL_MODELS[size];
+		const tmpDir = path.join(this.localRoot, "tmp");
+		await fs.promises.mkdir(tmpDir, { recursive: true });
+		await fs.promises.mkdir(this.modelsDir, { recursive: true });
+		try {
+			if (!(await this.resolveVlFile(assets.model.fileName))) {
+				const file = await this.download("vl-model", assets.model, tmpDir, onProgress);
+				await fs.promises.rename(file, path.join(this.modelsDir, assets.model.fileName));
+			}
+			if (!(await this.resolveVlFile(assets.mmproj.fileName))) {
+				const file = await this.download("vl-mmproj", assets.mmproj, tmpDir, onProgress);
+				await fs.promises.rename(file, path.join(this.modelsDir, assets.mmproj.fileName));
+			}
+		} finally {
+			await fs.promises.rm(tmpDir, { recursive: true, force: true });
+		}
+	}
+
+	get vlEndpoint(): string {
+		return `http://127.0.0.1:${this.vlPort}/v1`;
+	}
+
+	private get vlHealthUrl(): string {
+		return `http://127.0.0.1:${this.vlPort}/health`;
+	}
+
+	async vlReady(): Promise<boolean> {
+		return this.ping(this.vlHealthUrl, true);
+	}
+
+	private async waitForVl(): Promise<void> {
+		const deadline = Date.now() + 90_000;
+		while (Date.now() < deadline) {
+			if (await this.ping(this.vlHealthUrl, true)) return;
+			await delay(1_000);
+		}
+		throw new Error("el servidor de visión no respondió a tiempo.");
+	}
+
+	async startVl(): Promise<void> {
+		if (this.isAlive(this.vlProcess)) return;
+		const llamaBin = await this.resolveLlamaBinary();
+		let modelPath: string | null = null;
+		let mmprojPath: string | null = null;
+		for (const size of ["450m", "1.6b"] as VlModelSize[]) {
+			const assets = VL_MODELS[size];
+			const model = await this.resolveVlFile(assets.model.fileName);
+			const mmproj = await this.resolveVlFile(assets.mmproj.fileName);
+			if (model && mmproj) {
+				modelPath = model;
+				mmprojPath = mmproj;
+				break;
+			}
+		}
+		if (!llamaBin || !modelPath || !mmprojPath) {
+			throw new Error("El modelo de visión no está instalado.");
+		}
+		await fs.promises.mkdir(this.logsDir, { recursive: true });
+		const child = this.spawnServer(
+			"vl",
+			llamaBin,
+			buildVlArgs(modelPath, mmprojPath, this.vlPort, this.llmApiKey),
+		);
+		this.vlProcess = child;
+		try {
+			await this.waitForVl();
+		} catch (error) {
+			this.vlProcess = null;
+			child.kill("SIGKILL");
+			throw error;
+		}
+	}
+
 	private get sttHealthUrl(): string {
 		return `http://127.0.0.1:${this.sttPort}/`;
 	}
@@ -519,7 +661,7 @@ export class LocalModeManager {
 		throw new Error("llama-server no respondió a tiempo.");
 	}
 
-	async logsTail(maxLines = 200): Promise<{ stt: string; llm: string; dir: string }> {
+	async logsTail(maxLines = 200): Promise<{ stt: string; llm: string; vl: string; dir: string }> {
 		const tail = async (file: string): Promise<string> => {
 			try {
 				const content = await fs.promises.readFile(file, "utf8");
@@ -532,15 +674,21 @@ export class LocalModeManager {
 		return {
 			stt: await tail(this.logPath("stt")),
 			llm: await tail(this.logPath("llm")),
+			vl: await tail(this.logPath("vl")),
 			dir: this.logsDir,
 		};
 	}
 
-	private logPath(server: "stt" | "llm"): string {
-		return path.join(this.logsDir, server === "stt" ? "stt-server.log" : "llama-server.log");
+	private logPath(server: "stt" | "llm" | "vl"): string {
+		const file = server === "stt"
+			? "stt-server.log"
+			: server === "llm"
+				? "llama-server.log"
+				: "vl-server.log";
+		return path.join(this.logsDir, file);
 	}
 
-	private spawnServer(server: "stt" | "llm", bin: string, args: string[]): ChildProcess {
+	private spawnServer(server: "stt" | "llm" | "vl", bin: string, args: string[]): ChildProcess {
 		const logPath = this.logPath(server);
 		const logStream = fs.createWriteStream(logPath, { flags: "a" });
 		const child = spawn(bin, args, {
@@ -551,11 +699,20 @@ export class LocalModeManager {
 		child.stderr?.pipe(logStream, { end: false });
 		child.on("exit", () => {
 			logStream.end();
-			const tracked = server === "stt" ? this.sttProcess : this.llmProcess;
+			const tracked = server === "stt"
+				? this.sttProcess
+				: server === "llm"
+					? this.llmProcess
+					: this.vlProcess;
 			if (tracked !== child) return;
 			if (server === "stt") this.sttProcess = null;
-			else this.llmProcess = null;
-			const label = server === "stt" ? "servidor de voz" : "servidor de conversión";
+			else if (server === "llm") this.llmProcess = null;
+			else this.vlProcess = null;
+			const label = server === "stt"
+				? "servidor de voz"
+				: server === "llm"
+					? "servidor de conversión"
+					: "servidor de visión";
 			new Notice(`Vibe LaTeX: el ${label} se detuvo. Revisá el registro: ${logPath}`);
 		});
 		return child;
@@ -618,9 +775,10 @@ export class LocalModeManager {
 	}
 
 	async stop(): Promise<void> {
-		const children = [this.sttProcess, this.llmProcess];
+		const children = [this.sttProcess, this.llmProcess, this.vlProcess];
 		this.sttProcess = null;
 		this.llmProcess = null;
+		this.vlProcess = null;
 		await Promise.all(children.map((child) => this.terminate(child)));
 	}
 

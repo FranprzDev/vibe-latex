@@ -17,11 +17,11 @@ import {
 } from "./dictation-range";
 import { AudioRecorder, audioExtension } from "./recorder";
 import { createProvider } from "./providers";
-import { convertImageToLatex, convertPlainText, dictatePipeline } from "./pipeline";
+import { convertImageLocal, convertImageToLatex, convertPlainText, dictatePipeline } from "./pipeline";
 import { cleanPdfText, trailingEllipsisLength } from "./text-clean";
 import { friendlyError } from "./errors";
 import { anySignal } from "./abort";
-import { INSTALL_STEPS, InstallProgress, LocalModeManager, LocalStatus } from "./local/manager";
+import { INSTALL_STEPS, InstallProgress, LocalModeManager, LocalStatus, vlDownloadBytes, VlModelSize } from "./local/manager";
 import {
 	clampDuration,
 	DEFAULT_SETTINGS,
@@ -111,6 +111,12 @@ export default class LatexVoicePlugin extends Plugin {
 			name: "Terminar la frase y convertir ahora",
 			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "D" }],
 			callback: () => this.phraseAbort?.abort(),
+		});
+		this.addCommand({
+			id: "paste-image-as-latex-local",
+			name: "Pegar imagen del portapapeles como LaTeX (local)",
+			hotkeys: [{ modifiers: ["Mod", "Alt"], key: "I" }],
+			editorCallback: (editor) => void this.pasteImageAsLatexLocal(editor),
 		});
 		this.addCommand({
 			id: "show-server-logs",
@@ -228,6 +234,48 @@ export default class LatexVoicePlugin extends Plugin {
 			editor.replaceSelection(output);
 		} catch (e) {
 			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
+		}
+	}
+
+	private async pasteImageAsLatexLocal(editor: Editor): Promise<void> {
+		if (this.settings.providerId !== "local") {
+			new Notice("Vibe LaTeX: la conversión local de imágenes necesita el modo local activado.");
+			return;
+		}
+		const imageBase64 = await this.readClipboardImage();
+		if (!imageBase64) {
+			new Notice("Vibe LaTeX: el portapapeles no tiene una imagen.");
+			return;
+		}
+		const size: VlModelSize = this.settings.vlModel === "1.6b" ? "1.6b" : "450m";
+		if (!(await this.localManager.vlInstalled(size))) {
+			const mb = Math.round(vlDownloadBytes(size) / 1_000_000);
+			new Notice(
+				`Vibe LaTeX: primero descargá el modelo de visión (${mb} MB) en Ajustes → Avanzado.`,
+				8000,
+			);
+			return;
+		}
+		try {
+			if (!(await this.localManager.vlReady())) {
+				this.updateStatus("iniciando visión...");
+				await this.localManager.startVl();
+			}
+			this.updateStatus("convirtiendo imagen...");
+			const latex = await convertImageLocal(
+				imageBase64,
+				this.localManager.vlEndpoint,
+				this.settings.localLlmApiKey,
+			);
+			if (!latex) {
+				new Notice("Vibe LaTeX: no pude convertir la imagen.");
+				return;
+			}
+			editor.replaceSelection(latex);
+		} catch (e) {
+			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
+		} finally {
+			this.updateStatus("");
 		}
 	}
 
@@ -550,6 +598,8 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 	private lastSampleTime: number | null = null;
 	private lastSampleBytes = 0;
 	private speedBytesPerSecond = 0;
+	private vlDownloading = false;
+	private vlSetting: Setting | null = null;
 
 	constructor(app: App, private plugin: LatexVoicePlugin) {
 		super(app, plugin);
@@ -579,6 +629,8 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 	private async renderAll(): Promise<void> {
 		const token = ++this.renderToken;
 		const status = await this.plugin.localManager.status();
+		const vlSize: VlModelSize = this.plugin.settings.vlModel === "1.6b" ? "1.6b" : "450m";
+		const vlInstalled = status.installed && await this.plugin.localManager.vlInstalled(vlSize);
 		if (token !== this.renderToken) return;
 		const section = this.localSection;
 		if (!section) return;
@@ -587,7 +639,7 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		this.progressEl = null;
 		this.detailEl = null;
 		this.renderLocal(section, status);
-		if (this.advancedSection) this.renderAdvanced(this.advancedSection, status);
+		if (this.advancedSection) this.renderAdvanced(this.advancedSection, status, vlInstalled);
 	}
 
 	private renderLocal(section: HTMLElement, status: LocalStatus): void {
@@ -865,7 +917,7 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		el.style.margin = "16px 0 4px";
 	}
 
-	private renderAdvanced(container: HTMLElement, status: LocalStatus): void {
+	private renderAdvanced(container: HTMLElement, status: LocalStatus, vlInstalled: boolean): void {
 		container.empty();
 		const header = container.createDiv();
 		header.style.cursor = "pointer";
@@ -882,12 +934,66 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		};
 
 		this.renderServerGroup(content, status);
+		if (status.installed) this.renderVisionGroup(content, vlInstalled);
 		this.renderPathsGroup(content);
 		this.renderProviderGroup(content);
 		this.renderPromptGroup(content);
 		this.renderImproveGroup(content);
 		this.renderRecordingGroup(content);
 		this.renderUsageGroup(content);
+	}
+
+	private renderVisionGroup(container: HTMLElement, installed: boolean): void {
+		this.vlSetting = null;
+		if (this.vlDownloading) {
+			this.vlSetting = new Setting(container)
+				.setName("Imagen → LaTeX local")
+				.setDesc("Descargando el modelo de visión...");
+			return;
+		}
+		if (installed) {
+			new Setting(container)
+				.setName("Imagen → LaTeX local")
+				.setDesc("Modelo de visión instalado. Con una imagen en el portapapeles: Cmd/Ctrl+Alt+I.");
+			return;
+		}
+		const size: VlModelSize = this.plugin.settings.vlModel === "1.6b" ? "1.6b" : "450m";
+		new Setting(container)
+			.setName("Imagen → LaTeX local")
+			.setDesc("Convierte imágenes del portapapeles a LaTeX con un modelo de visión propio, sin nube.")
+			.addDropdown((d) =>
+				d.addOption("450m", "450M (307 MB, recomendado)")
+					.addOption("1.6b", "1.6B (1,2 GB, más calidad)")
+					.setValue(size)
+					.onChange(async (v) => {
+						this.plugin.settings.vlModel = v;
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			)
+			.addButton((b) =>
+				b.setButtonText("Descargar").onClick(() => void this.downloadVl())
+			);
+	}
+
+	private async downloadVl(): Promise<void> {
+		const size: VlModelSize = this.plugin.settings.vlModel === "1.6b" ? "1.6b" : "450m";
+		this.vlDownloading = true;
+		this.display();
+		try {
+			await this.plugin.localManager.installVl(size, (p) => {
+				if (p.totalBytes && this.vlSetting) {
+					const pct = Math.round((p.downloadedBytes / p.totalBytes) * 100);
+					this.vlSetting.setDesc(`Descargando el modelo de visión... ${pct}%`);
+				}
+			});
+			new Notice("Vibe LaTeX: modelo de visión instalado.");
+		} catch (e) {
+			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
+		} finally {
+			this.vlDownloading = false;
+			this.display();
+		}
 	}
 
 	private renderServerGroup(container: HTMLElement, status: LocalStatus): void {
@@ -1225,7 +1331,7 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 class ServerLogsModal extends Modal {
 	constructor(
 		app: App,
-		private logs: { stt: string; llm: string; dir: string },
+		private logs: { stt: string; llm: string; vl: string; dir: string },
 	) {
 		super(app);
 	}
@@ -1237,6 +1343,7 @@ class ServerLogsModal extends Modal {
 		for (const [title, body] of [
 			["Voz (whisper)", this.logs.stt],
 			["Conversión (llama)", this.logs.llm],
+			["Visión (LFM)", this.logs.vl],
 		] as const) {
 			contentEl.createEl("h4", { text: title });
 			const pre = contentEl.createEl("pre");
@@ -1249,7 +1356,9 @@ class ServerLogsModal extends Modal {
 		new Setting(contentEl).addButton((b) =>
 			b.setButtonText("Copiar todo").onClick(() => {
 				void navigator.clipboard
-					.writeText(`--- whisper ---\n${this.logs.stt}\n--- llama ---\n${this.logs.llm}`)
+					.writeText(
+						`--- whisper ---\n${this.logs.stt}\n--- llama ---\n${this.logs.llm}\n--- vision ---\n${this.logs.vl}`,
+					)
 					.then(() => new Notice("Vibe LaTeX: registros copiados."));
 			}),
 		);

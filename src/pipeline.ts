@@ -172,6 +172,73 @@ export async function convertImageToLatex(
 	}
 }
 
+const VISION_PREFIXES = [
+	/^the (equation|formula|table|image|latex)( is)?[::]?\s*/i,
+	/^here is the (equation|formula|table|latex)[::]?\s*/i,
+];
+
+export function cleanVisionLatex(raw: string): string | null {
+	let text = raw.trim();
+	const fence = text.match(/```(?:latex|tex)?\s*([\s\S]*?)```/i);
+	if (fence) text = fence[1].trim();
+	for (const prefix of VISION_PREFIXES) text = text.replace(prefix, "");
+	text = text.trim();
+	if (!text) return null;
+	if (looksLikeMetaResponse(text)) return null;
+	return text;
+}
+
+export async function convertImageLocal(
+	imageBase64: string,
+	endpoint: string,
+	apiKey: string,
+): Promise<string | null> {
+	const body = JSON.stringify({
+		model: "lfm-vl",
+		messages: [
+			{
+				role: "user",
+				content: [
+					{ type: "image_url", image_url: { url: `data:image/png;base64,${imageBase64}` } },
+					{
+						type: "text",
+						text: "Extract the math from the image and output it as LaTeX. If it is a table, use a tabular environment. Output ONLY the LaTeX code, no explanation.",
+					},
+				],
+			},
+		],
+		temperature: 0.1,
+		max_tokens: 512,
+		min_p: 0.15,
+		repeat_penalty: 1.05,
+	});
+	for (let attempt = 0; attempt < 30; attempt++) {
+		try {
+			const res = await fetch(`${endpoint}/chat/completions`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${apiKey}`,
+				},
+				body,
+				signal: AbortSignal.timeout(120_000),
+			});
+			if (res.status === 503) {
+				await new Promise((r) => setTimeout(r, 2_000));
+				continue;
+			}
+			if (!res.ok) return null;
+			const data = (await res.json()) as {
+				choices?: Array<{ message?: { content?: string } }>;
+			};
+			return cleanVisionLatex(data.choices?.[0]?.message?.content ?? "");
+		} catch {
+			return null;
+		}
+	}
+	return null;
+}
+
 async function maybeImprove(text: string, settings: LatexVoiceSettings): Promise<string> {
 	if (!settings.improveEnabled || !settings.improveUrl?.trim()) return text;
 	try {
