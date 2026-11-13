@@ -162,8 +162,6 @@ export function buildLlamaArgs(modelPath: string, port: number, apiKey: string):
 		"--port", String(port),
 		"--api-key", apiKey,
 		"-c", "4096",
-		"-ngl", "99",
-		"--flash-attn",
 	];
 }
 
@@ -519,6 +517,23 @@ export class LocalModeManager {
 			await delay(2_000);
 		}
 		throw new Error("llama-server no respondió a tiempo.");
+	}
+
+	async logsTail(maxLines = 200): Promise<{ stt: string; llm: string; dir: string }> {
+		const tail = async (file: string): Promise<string> => {
+			try {
+				const content = await fs.promises.readFile(file, "utf8");
+				const lines = content.trimEnd().split("\n");
+				return lines.slice(-maxLines).join("\n") || "(vacío)";
+			} catch {
+				return "(sin registro todavía)";
+			}
+		};
+		return {
+			stt: await tail(this.logPath("stt")),
+			llm: await tail(this.logPath("llm")),
+			dir: this.logsDir,
+		};
 	}
 
 	private logPath(server: "stt" | "llm"): string {

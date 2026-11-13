@@ -25,6 +25,15 @@ vi.mock("obsidian", () => {
 		}
 		addSettingTab() {}
 	}
+	class Modal {
+		contentEl = { createEl() { return { style: {}, setText() {} }; } };
+		constructor(public app: unknown) {}
+		open() {}
+		close() {}
+	}
+	class PlatformCls {
+		static isDesktopApp = false;
+	}
 	class PluginSettingTab {
 		containerEl = { empty() {}, createEl() { return {}; } };
 		constructor(public app: unknown, public plugin: unknown) {}
@@ -58,7 +67,7 @@ vi.mock("obsidian", () => {
 		}
 	}
 	class MarkdownView {}
-	return { Plugin, PluginSettingTab, Setting, Notice, MarkdownView, App: class {} };
+	return { Plugin, PluginSettingTab, Setting, Notice, MarkdownView, Modal, Platform: PlatformCls, App: class {} };
 });
 
 import LatexVoicePlugin from "../src/main";
