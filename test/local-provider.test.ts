@@ -150,3 +150,40 @@ describe("LocalProvider API key", () => {
 		expect(convertHeaders.Authorization).toBeUndefined();
 	});
 });
+
+describe("streaming conversion", () => {
+	it("parses SSE deltas and reports accumulated text", async () => {
+		const { LocalProvider } = await import("../src/providers/local");
+		const sse = [
+			'data: {"choices":[{"delta":{"content":"$$"}}]}\n\n',
+			'data: {"choices":[{"delta":{"content":"\\\\int x"}}]}\n\n',
+			'data: {"choices":[{"delta":{"content":"^2"}}]}\n\n',
+			'data: [DONE]\n\n',
+		].join("");
+		const stream = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode(sse));
+				controller.close();
+			},
+		});
+		vi.stubGlobal("fetch", vi.fn(async () => new Response(stream, { status: 200 })));
+		try {
+			const p = new LocalProvider({
+				transcriptionBaseUrl: "http://127.0.0.1:10000",
+				conversionBaseUrl: "http://127.0.0.1:8082/v1",
+				transcriptionModel: "whisper",
+				conversionModel: "qwen",
+			});
+			const seen: string[] = [];
+			const out = await p.convertToLatex("integral de equis al cuadrado", {
+				systemPrompt: "sys",
+				maxTokens: 64,
+				onToken: (acc) => seen.push(acc),
+			});
+			expect(out.text).toBe("$$\\int x^2");
+			expect(seen).toEqual(["$$", "$$\\int x", "$$\\int x^2"]);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});

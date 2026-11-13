@@ -67,6 +67,7 @@ export interface LatexVoiceSettings {
 	conversionPrompt: string;
 	/** Inserts the transcript immediately, then swaps it for the converted LaTeX. */
 	streamingInsert: boolean;
+	alwaysConvert: boolean;
 	improveEnabled: boolean;
 	improveUrl: string;
 	whisperServerPath: string;
@@ -109,6 +110,7 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	transcriptionContext: DEFAULT_TRANSCRIPTION_CONTEXT_ES,
 	conversionPrompt: DEFAULT_CONVERSION_PROMPT_ES,
 	streamingInsert: true,
+	alwaysConvert: false,
 	improveEnabled: false,
 	improveUrl: "https://vibe-latex-improve.franprzdev.workers.dev",
 	whisperServerPath: "",
@@ -225,6 +227,8 @@ export function migrateSettings(
 	if (typeof settings.llmModelPath !== "string") settings.llmModelPath = "";
 	if (typeof settings.streamingInsert !== "boolean")
 		settings.streamingInsert = DEFAULT_SETTINGS.streamingInsert;
+	if (typeof settings.alwaysConvert !== "boolean")
+		settings.alwaysConvert = DEFAULT_SETTINGS.alwaysConvert;
 	if (!isLastDictation(settings.lastDictation))
 		settings.lastDictation = null;
 	if (!isPreviousRemoteSettings(settings.previousRemoteSettings))
