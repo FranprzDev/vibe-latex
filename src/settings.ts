@@ -24,7 +24,8 @@ export interface LastDictation {
 export interface LatexVoiceSettings {
 	providerId: string;
 	openaiApiKey: string;
-	openaiBaseUrl: string;
+	transcriptionBaseUrl: string;
+	conversionBaseUrl: string;
 	transcriptionModel: string;
 	conversionModel: string;
 	transcriptionContext: string;
@@ -53,7 +54,8 @@ export interface LatexVoiceSettings {
 export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	providerId: "openai",
 	openaiApiKey: "",
-	openaiBaseUrl: "https://api.openai.com/v1",
+	transcriptionBaseUrl: "https://api.openai.com/v1",
+	conversionBaseUrl: "https://api.openai.com/v1",
 	transcriptionModel: "gpt-transcribe",
 	conversionModel: "gpt-6-luna",
 	transcriptionContext: DEFAULT_TRANSCRIPTION_CONTEXT_ES,
@@ -111,6 +113,14 @@ export function migrateSettings(
 	const data = { ...(raw ?? {}) };
 	delete data.language;
 
+	if (typeof data.openaiBaseUrl === "string" && data.openaiBaseUrl !== "") {
+		if (typeof data.transcriptionBaseUrl !== "string" || data.transcriptionBaseUrl === "")
+			data.transcriptionBaseUrl = data.openaiBaseUrl;
+		if (typeof data.conversionBaseUrl !== "string" || data.conversionBaseUrl === "")
+			data.conversionBaseUrl = data.openaiBaseUrl;
+	}
+	delete data.openaiBaseUrl;
+
 	const settings: LatexVoiceSettings = {
 		...DEFAULT_SETTINGS,
 		...data,
@@ -131,4 +141,9 @@ export function migrateSettings(
 	settings.graceMs = clampDuration(settings.graceMs, DEFAULT_SETTINGS.graceMs, 1_000, 60_000);
 
 	return settings;
+}
+
+export function needsApiKey(settings: LatexVoiceSettings): boolean {
+	return settings.transcriptionBaseUrl.includes("api.openai.com") ||
+		settings.conversionBaseUrl.includes("api.openai.com");
 }

@@ -20,6 +20,7 @@ import {
 	LatexVoiceSettings,
 	LastDictation,
 	migrateSettings,
+	needsApiKey,
 } from "./settings";
 
 export default class LatexVoicePlugin extends Plugin {
@@ -53,9 +54,9 @@ export default class LatexVoicePlugin extends Plugin {
 
 		this.addSettingTab(new LatexVoiceSettingTab(this.app, this));
 
-		if (!this.settings.openaiApiKey && !this.settings.devMode) {
+		if (!this.settings.openaiApiKey && needsApiKey(this.settings) && !this.settings.devMode) {
 			new Notice(
-				"Vibe LaTeX: pegá tu clave API de OpenAI en Ajustes → Vibe LaTeX para empezar.",
+				"Vibe LaTeX: pegá tu clave API de OpenAI en Ajustes → Vibe LaTeX, o configurá un endpoint local.",
 				8000,
 			);
 		}
@@ -95,7 +96,7 @@ export default class LatexVoicePlugin extends Plugin {
 			this.sessionAbort.abort();
 			return;
 		}
-		if (!this.settings.openaiApiKey) {
+		if (!this.settings.openaiApiKey && needsApiKey(this.settings)) {
 			new Notice("Vibe LaTeX: falta la clave API (Ajustes → Vibe LaTeX).");
 			return;
 		}
@@ -121,7 +122,7 @@ export default class LatexVoicePlugin extends Plugin {
 			);
 			return;
 		}
-		if (!this.settings.openaiApiKey) {
+		if (!this.settings.openaiApiKey && needsApiKey(this.settings)) {
 			new Notice("Vibe LaTeX: falta la clave API (Ajustes → Vibe LaTeX).");
 			return;
 		}
@@ -274,12 +275,12 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		const s = this.plugin.settings;
 
 		containerEl.createEl("p", {
-			text: "Usá tu propia clave de OpenAI; se necesita para transcribir el audio y convertirlo en LaTeX.",
+			text: "Usá tu propia clave de OpenAI, o un endpoint local gratuito (Ollama + Speaches) sin clave.",
 		});
 
 		const apiKeySetting = new Setting(containerEl)
 			.setName("Clave API de OpenAI")
-			.setDesc("Necesaria. Obtenela en platform.openai.com, en la sección de claves API.")
+			.setDesc("Necesaria solo para OpenAI u otro servicio con clave. Dejala vacía para endpoints locales.")
 			.addText((t) =>
 				t.setPlaceholder("sk-...")
 					.setValue(s.openaiApiKey)
@@ -291,11 +292,44 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		apiKeySetting.controlEl.querySelector("input")?.setAttribute("type", "password");
 
 		new Setting(containerEl)
-			.setName("URL base")
-			.setDesc("Dirección de un servicio compatible con la API de OpenAI.")
+			.setName("Configuración rápida")
+			.addButton((b) =>
+				b.setButtonText("OpenAI").onClick(async () => {
+					s.transcriptionBaseUrl = "https://api.openai.com/v1";
+					s.conversionBaseUrl = "https://api.openai.com/v1";
+					s.transcriptionModel = DEFAULT_SETTINGS.transcriptionModel;
+					s.conversionModel = DEFAULT_SETTINGS.conversionModel;
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			)
+			.addButton((b) =>
+				b.setButtonText("Local gratis").onClick(async () => {
+					s.transcriptionBaseUrl = "http://localhost:8000/v1";
+					s.conversionBaseUrl = "http://localhost:11434/v1";
+					s.transcriptionModel = "Systran/faster-whisper-small";
+					s.conversionModel = "qwen2.5:7b";
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("URL de transcripción")
+			.setDesc("OpenAI: https://api.openai.com/v1 · Local: http://localhost:8000/v1 (Speaches o whisper.cpp)")
 			.addText((t) =>
-				t.setValue(s.openaiBaseUrl).onChange(async (v) => {
-					s.openaiBaseUrl = v.trim();
+				t.setValue(s.transcriptionBaseUrl).onChange(async (v) => {
+					s.transcriptionBaseUrl = v.trim();
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("URL de conversión")
+			.setDesc("OpenAI: https://api.openai.com/v1 · Local: http://localhost:11434/v1 (Ollama)")
+			.addText((t) =>
+				t.setValue(s.conversionBaseUrl).onChange(async (v) => {
+					s.conversionBaseUrl = v.trim();
 					await this.plugin.saveSettings();
 				})
 			);
