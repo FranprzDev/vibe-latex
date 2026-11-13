@@ -24,3 +24,13 @@ export function dictationReplacementText(
 		: selection.length === 0 || selection.endsWith("\n");
 	return output + (keepLineBreak ? "\n" : "");
 }
+
+export function extendDictationRange(
+	session: Pick<DictationRange, "filePath" | "from" | "to"> | null,
+	filePath: string,
+	from: number,
+	to: number,
+): Pick<DictationRange, "filePath" | "from" | "to"> {
+	if (!session || session.filePath !== filePath) return { filePath, from, to };
+	return { filePath, from: Math.min(session.from, from), to: Math.max(session.to, to) };
+}

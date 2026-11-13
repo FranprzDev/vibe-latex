@@ -94,6 +94,8 @@ export interface LatexVoiceSettings {
 	};
 	/** Last inserted phrase, so "Corregir la última frase" survives a reload. */
 	lastDictation?: LastDictation | null;
+	/** Everything inserted by the last dictation session. */
+	lastSession?: LastDictation | null;
 	/** Remote provider config to restore when local mode is deactivated. */
 	previousRemoteSettings?: PreviousRemoteSettings | null;
 	/** E2E only. Requires devMode=true AND testAudioPath set — otherwise ignored. */
@@ -129,6 +131,7 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	autoStartLocal: true,
 	usage: { audioSeconds: 0, inputTokens: 0, outputTokens: 0, requests: 0 },
 	lastDictation: null,
+	lastSession: null,
 	previousRemoteSettings: null,
 };
 
@@ -232,6 +235,8 @@ export function migrateSettings(
 		settings.alwaysConvert = DEFAULT_SETTINGS.alwaysConvert;
 	if (!isLastDictation(settings.lastDictation))
 		settings.lastDictation = null;
+	if (!isLastDictation(settings.lastSession))
+		settings.lastSession = null;
 	if (!isPreviousRemoteSettings(settings.previousRemoteSettings))
 		settings.previousRemoteSettings = null;
 	settings.silenceMs = clampDuration(settings.silenceMs, DEFAULT_SETTINGS.silenceMs, 500, 10_000);

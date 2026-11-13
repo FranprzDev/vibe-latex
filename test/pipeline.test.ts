@@ -378,6 +378,16 @@ describe("applyVoiceEdit", () => {
 		};
 		expect(await applyVoiceEdit(provider, "x = 1", "cambiá la equis por z")).toBeNull();
 	});
+
+	it("unwraps fenced model output", async () => {
+		const provider: VoiceProvider = {
+			...fakeProvider,
+			async convertToLatex() {
+				return { text: "```markdown\n1) uno\n2) dos\n```" };
+			},
+		};
+		expect(await applyVoiceEdit(provider, "uno dos", "enumeralo")).toBe("1) uno\n2) dos");
+	});
 });
 
 describe("buildEditUserText", () => {
