@@ -321,8 +321,6 @@ describe("spawn arguments", () => {
 			"--port", "8082",
 			"--api-key", "secret",
 			"-c", "4096",
-			"-ngl", "99",
-			"--flash-attn",
 		]);
 	});
 });

@@ -2,7 +2,9 @@ import {
 	App,
 	Editor,
 	MarkdownView,
+	Modal,
 	Notice,
+	Platform,
 	Plugin,
 	PluginSettingTab,
 	Setting,
@@ -107,6 +109,16 @@ export default class LatexVoicePlugin extends Plugin {
 			name: "Terminar la frase y convertir ahora",
 			callback: () => this.phraseAbort?.abort(),
 		});
+		this.addCommand({
+			id: "show-server-logs",
+			name: "Ver los registros de los servidores",
+			callback: () => void this.showServerLogs(),
+		});
+		this.addCommand({
+			id: "open-logs-folder",
+			name: "Abrir la carpeta de registros",
+			callback: () => void this.openLogsFolder(),
+		});
 
 		this.addSettingTab(new LatexVoiceSettingTab(this.app, this));
 
@@ -116,6 +128,28 @@ export default class LatexVoicePlugin extends Plugin {
 				8000,
 			);
 		}
+	}
+
+	private async showServerLogs(): Promise<void> {
+		const logs = await this.localManager.logsTail();
+		new ServerLogsModal(this.app, logs).open();
+	}
+
+	private async openLogsFolder(): Promise<void> {
+		const { dir } = await this.localManager.logsTail(1);
+		if (Platform.isDesktopApp) {
+			try {
+				const req = (window as unknown as {
+					require: (m: string) => { shell: { openPath(p: string): Promise<string> } };
+				}).require;
+				const err = await req("electron").shell.openPath(dir);
+				if (!err) return;
+			} catch {
+				// fall through to the clipboard fallback
+			}
+		}
+		await navigator.clipboard.writeText(dir).catch(() => undefined);
+		new Notice(`Vibe LaTeX: carpeta de registros (copiada al portapapeles): ${dir}`, 8000);
 	}
 
 	private async convertSelectionToLatex(editor: Editor): Promise<void> {
@@ -1180,5 +1214,43 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 					this.display();
 				})
 			);
+	}
+}
+
+class ServerLogsModal extends Modal {
+	constructor(
+		app: App,
+		private logs: { stt: string; llm: string; dir: string },
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: "Registros de los servidores" });
+		contentEl.createEl("p", { text: this.logs.dir, cls: "setting-item-description" });
+		for (const [title, body] of [
+			["Voz (whisper)", this.logs.stt],
+			["Conversión (llama)", this.logs.llm],
+		] as const) {
+			contentEl.createEl("h4", { text: title });
+			const pre = contentEl.createEl("pre");
+			pre.style.maxHeight = "200px";
+			pre.style.overflow = "auto";
+			pre.style.whiteSpace = "pre-wrap";
+			pre.style.fontSize = "11px";
+			pre.setText(body);
+		}
+		new Setting(contentEl).addButton((b) =>
+			b.setButtonText("Copiar todo").onClick(() => {
+				void navigator.clipboard
+					.writeText(`--- whisper ---\n${this.logs.stt}\n--- llama ---\n${this.logs.llm}`)
+					.then(() => new Notice("Vibe LaTeX: registros copiados."));
+			}),
+		);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
 	}
 }
