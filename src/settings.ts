@@ -221,8 +221,7 @@ export function migrateSettings(
 		settings.transcriptionContext = DEFAULT_TRANSCRIPTION_CONTEXT_ES;
 	if (typeof settings.improveEnabled !== "boolean")
 		settings.improveEnabled = DEFAULT_SETTINGS.improveEnabled;
-	if (typeof settings.improveUrl !== "string")
-		settings.improveUrl = DEFAULT_SETTINGS.improveUrl;
+	settings.improveUrl = DEFAULT_SETTINGS.improveUrl;
 	if (typeof settings.whisperServerPath !== "string") settings.whisperServerPath = "";
 	if (typeof settings.llamaServerPath !== "string") settings.llamaServerPath = "";
 	if (typeof settings.whisperModelPath !== "string") settings.whisperModelPath = "";
