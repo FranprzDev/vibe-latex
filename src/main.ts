@@ -6,6 +6,7 @@ import {
 	PluginSettingTab,
 	Setting,
 } from "obsidian";
+import type { FileSystemAdapter } from "obsidian";
 import {
 	dictationReplacementText,
 	verifiedDictationRange,
@@ -14,6 +15,7 @@ import { AudioRecorder, audioExtension } from "./recorder";
 import { createProvider } from "./providers";
 import { dictatePipeline } from "./pipeline";
 import { friendlyError } from "./errors";
+import { InstallProgress, LocalModeManager, LocalStatus } from "./local/manager";
 import {
 	clampDuration,
 	DEFAULT_SETTINGS,
@@ -25,6 +27,7 @@ import {
 
 export default class LatexVoicePlugin extends Plugin {
 	declare settings: LatexVoiceSettings;
+	localManager!: LocalModeManager;
 	private recorder = new AudioRecorder();
 	private statusBarEl!: HTMLElement;
 	private sessionAbort: AbortController | null = null;
@@ -32,6 +35,27 @@ export default class LatexVoicePlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+
+		const adapter = this.app.vault?.adapter as FileSystemAdapter | undefined;
+		const basePath = adapter && typeof adapter.getBasePath === "function"
+			? adapter.getBasePath()
+			: "";
+		this.localManager = new LocalModeManager({
+			basePath,
+			pluginDir: this.manifest?.dir ?? ".obsidian/plugins/vibe-latex",
+			sttPort: this.settings.sttPort,
+			llmPort: this.settings.llmPort,
+		});
+
+		if (this.settings.providerId === "local" && this.settings.autoStartLocal) {
+			const status = await this.localManager.status();
+			if (status.installed) {
+				this.localManager.start().catch((e) => {
+					new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
+				});
+			}
+		}
+
 		this.statusBarEl = this.addStatusBarItem();
 		this.updateStatus("");
 
@@ -62,9 +86,10 @@ export default class LatexVoicePlugin extends Plugin {
 		}
 	}
 
-	onunload() {
+	async onunload() {
 		this.sessionAbort?.abort();
 		this.recorder.dispose();
+		await this.localManager?.stop().catch(() => undefined);
 	}
 
 	async loadSettings() {
@@ -265,6 +290,9 @@ export default class LatexVoicePlugin extends Plugin {
 }
 
 class LatexVoiceSettingTab extends PluginSettingTab {
+	private localSection: HTMLElement | null = null;
+	private localInstalling = false;
+
 	constructor(app: App, private plugin: LatexVoicePlugin) {
 		super(app, plugin);
 	}
@@ -273,6 +301,10 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 		const s = this.plugin.settings;
+
+		new Setting(containerEl).setName("Modo local (gratis, sin nube)").setHeading();
+		this.localSection = containerEl.createDiv();
+		void this.renderLocalSection();
 
 		containerEl.createEl("p", {
 			text: "Usá tu propia clave de OpenAI, o un endpoint local gratuito (Ollama + Speaches) sin clave.",
@@ -443,5 +475,171 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 					this.display();
 				})
 			);
+	}
+
+	private progressText(p: InstallProgress): string {
+		if (p.totalBytes && p.totalBytes > 0) {
+			const pct = Math.round((p.downloadedBytes / p.totalBytes) * 100);
+			return `Descargando ${p.step}: ${pct}%`;
+		}
+		return `Descargando ${p.step}: ${(p.downloadedBytes / 1_000_000).toFixed(0)} MB`;
+	}
+
+	private async syncPorts(): Promise<void> {
+		const s = this.plugin.settings;
+		if (s.providerId !== "local") return;
+		const status = await this.plugin.localManager.status();
+		if (!status.running.stt && !status.running.llm) return;
+		try {
+			await this.plugin.localManager.updatePorts(s.sttPort, s.llmPort);
+		} catch (e) {
+			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
+		}
+	}
+
+	private async renderLocalSection(): Promise<void> {
+		const section = this.localSection;
+		if (!section) return;
+		const manager = this.plugin.localManager;
+		section.empty();
+
+		const statusEl = section.createEl("p");
+		statusEl.setText("Comprobando estado...");
+
+		const status = await manager.status();
+		if (this.localSection !== section) return;
+
+		const renderStatus = (st: LocalStatus) => {
+			if (!st.installed) {
+				statusEl.setText("No instalado. Instalá el modo local para dictar sin nube ni clave.");
+			} else {
+				const servers = st.running.stt || st.running.llm ? "en ejecución" : "detenidos";
+				statusEl.setText(`Instalado (servidores ${servers}).`);
+			}
+		};
+		renderStatus(status);
+
+		if (!status.installed) {
+			new Setting(section)
+				.setName("Instalar modo local")
+				.setDesc("Descarga whisper.cpp + whisper small y llama.cpp + Qwen3.5 9B, y los deja listos para usar.")
+				.addButton((b) => {
+					b.setButtonText("Instalar modo local").onClick(async () => {
+						if (this.localInstalling) return;
+						this.localInstalling = true;
+						b.setDisabled(true);
+						try {
+							await manager.install((p) => statusEl.setText(this.progressText(p)));
+							const settings = this.plugin.settings;
+							settings.providerId = "local";
+							settings.transcriptionBaseUrl = `http://127.0.0.1:${settings.sttPort}`;
+							settings.conversionBaseUrl = `http://127.0.0.1:${settings.llmPort}/v1`;
+							settings.transcriptionModel = "whisper-small";
+							settings.conversionModel = "qwen3.5-9b";
+							await this.plugin.saveSettings();
+							statusEl.setText("Iniciando servidores...");
+							await manager.start();
+							new Notice("Modo local instalado y activo");
+						} catch (e) {
+							statusEl.setText(e instanceof Error ? e.message : String(e));
+							b.setDisabled(false);
+							this.localInstalling = false;
+							return;
+						}
+						this.localInstalling = false;
+						this.display();
+					});
+				});
+		} else {
+			const running = status.running.stt && status.running.llm;
+			new Setting(section)
+				.setName("Servidores locales")
+				.setDesc("Iniciá o detené whisper.cpp y llama-server.")
+				.addButton((b) => {
+					b.setButtonText(running ? "Detener" : "Iniciar").onClick(async () => {
+						b.setDisabled(true);
+						try {
+							if (running) await manager.stop();
+							else await manager.start();
+						} catch (e) {
+							new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
+						}
+						this.display();
+					});
+				})
+				.addButton((b) => {
+					let armed = false;
+					let timer = 0;
+					b.setButtonText("Desinstalar").setWarning().onClick(async () => {
+						if (!armed) {
+							armed = true;
+							b.setButtonText("Confirmar desinstalación");
+							timer = window.setTimeout(() => {
+								armed = false;
+								b.setButtonText("Desinstalar");
+							}, 5000);
+							return;
+						}
+						window.clearTimeout(timer);
+						b.setDisabled(true);
+						try {
+							await manager.uninstall();
+							new Notice("Modo local desinstalado");
+						} catch (e) {
+							new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
+						}
+						this.display();
+					});
+				});
+		}
+
+		new Setting(section)
+			.setName("Puerto de transcripción")
+			.setDesc("whisper.cpp escucha en este puerto.")
+			.addText((t) => {
+				t.inputEl.type = "number";
+				t.inputEl.min = "1024";
+				t.inputEl.max = "65535";
+				t.setValue(String(this.plugin.settings.sttPort));
+				t.onChange(async (v) => {
+					const n = Number(v);
+					if (!Number.isFinite(n)) return;
+					this.plugin.settings.sttPort =
+						clampDuration(n, DEFAULT_SETTINGS.sttPort, 1024, 65_535);
+					await this.plugin.saveSettings();
+					await this.syncPorts();
+				});
+			});
+
+		new Setting(section)
+			.setName("Puerto de conversión")
+			.setDesc("llama-server escucha en este puerto.")
+			.addText((t) => {
+				t.inputEl.type = "number";
+				t.inputEl.min = "1024";
+				t.inputEl.max = "65535";
+				t.setValue(String(this.plugin.settings.llmPort));
+				t.onChange(async (v) => {
+					const n = Number(v);
+					if (!Number.isFinite(n)) return;
+					this.plugin.settings.llmPort =
+						clampDuration(n, DEFAULT_SETTINGS.llmPort, 1024, 65_535);
+					await this.plugin.saveSettings();
+					await this.syncPorts();
+				});
+			});
+
+		new Setting(section)
+			.setName("Iniciar los servidores al abrir Obsidian")
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.autoStartLocal).onChange(async (v) => {
+					this.plugin.settings.autoStartLocal = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		section.createEl("p", {
+			text: "La primera instalación descarga unos 6,5 GB (whisper small ~0,5 GB + Qwen3.5 9B ~6 GB) y necesita unos 8 GB de disco libre.",
+		});
 	}
 }
