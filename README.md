@@ -39,7 +39,7 @@ Podés usar el plugin sin clave ni costos con servidores locales. El plugin pued
 2. Presioná **Instalar modo local**. El plugin descarga y configura todo solo:
    - **Transcripción**: el servidor de [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (`whisper-server`) con el modelo **whisper small** (`ggml-small.bin`).
    - **Conversión**: [llama.cpp](https://github.com/ggml-org/llama.cpp) (`llama-server`) con el modelo **Qwen3.5 9B** en cuantización Q4_K_M.
-   - Los servidores escuchan en los puertos **8081** (transcripción) y **8082** (conversión), configurables desde los mismos ajustes. En Windows la conversión usa la variante Vulkan de llama.cpp, que acelera con la GPU usando los drivers normales de NVIDIA, AMD o Intel.
+   - Los servidores escuchan en los puertos **10000** (transcripción) y **8082** (conversión), configurables desde los mismos ajustes. En Windows la conversión usa la variante Vulkan de llama.cpp, que acelera con la GPU usando los drivers normales de NVIDIA, AMD o Intel.
 3. Al terminar, el plugin activa el proveedor local, inicia los servidores y deja el dictado listo. La primera instalación descarga unos **6,5 GB** (whisper small ~0,5 GB + Qwen3.5 9B ~6 GB) y necesita unos **8 GB** de disco libre.
 
 Los binarios y modelos se guardan en `<tu-vault>/.obsidian/plugins/vibe-latex/local/`. Desde los ajustes podés iniciar o detener los servidores, y desinstalarlos por completo. La opción **Iniciar los servidores al abrir Obsidian** los levanta automáticamente cada vez que abrís la aplicación.

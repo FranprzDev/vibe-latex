@@ -104,3 +104,26 @@ describe("clampDuration", () => {
 		expect(clampDuration(undefined, 2800, 500, 10_000)).toBe(2800);
 	});
 });
+
+describe("0.5.1 port migration", () => {
+	it("moves the untouched 0.5.0 STT port and URL to 10000", () => {
+		const s = migrateSettings({
+			providerId: "local",
+			sttPort: 8081,
+			transcriptionBaseUrl: "http://127.0.0.1:8081",
+			conversionBaseUrl: "http://127.0.0.1:8082/v1",
+		});
+		expect(s.sttPort).toBe(10000);
+		expect(s.transcriptionBaseUrl).toBe("http://127.0.0.1:10000");
+		expect(s.conversionBaseUrl).toBe("http://127.0.0.1:8082/v1");
+	});
+
+	it("leaves custom ports and URLs alone", () => {
+		const s = migrateSettings({
+			sttPort: 9000,
+			transcriptionBaseUrl: "http://localhost:9000",
+		});
+		expect(s.sttPort).toBe(9000);
+		expect(s.transcriptionBaseUrl).toBe("http://localhost:9000");
+	});
+});
