@@ -24,7 +24,7 @@ vi.mock("child_process", () => ({
 	),
 }));
 
-const STT_BASE = "https://github.com/FranprzDev/vibe-latex/releases/latest/download";
+const STT_BASE = "https://github.com/FranprzDev/vibe-latex/releases/download/stt-v1.9.5";
 const LLAMA_BASE = "https://github.com/ggml-org/llama.cpp/releases/download/b12340";
 
 describe("resolveAssets", () => {
