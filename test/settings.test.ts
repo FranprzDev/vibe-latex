@@ -89,14 +89,12 @@ describe("migrateSettings", () => {
 
 	it("ships dictation timing defaults", () => {
 		expect(DEFAULT_SETTINGS.silenceMs).toBe(2800);
-		expect(DEFAULT_SETTINGS.maxPhraseMs).toBe(60_000);
 		expect(DEFAULT_SETTINGS.graceMs).toBe(10_000);
 	});
 
 	it("clamps persisted durations during migration", () => {
-		const s = migrateSettings({ silenceMs: 10, maxPhraseMs: "abc", graceMs: 1e9 });
+		const s = migrateSettings({ silenceMs: 10, graceMs: 1e9 });
 		expect(s.silenceMs).toBe(500);
-		expect(s.maxPhraseMs).toBe(DEFAULT_SETTINGS.maxPhraseMs);
 		expect(s.graceMs).toBe(60_000);
 	});
 
