@@ -1,0 +1,100 @@
+name: STT Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to upload the STT server binaries to
+        required: true
+        type: string
+  push:
+    tags:
+      - "stt-v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stt-server-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.os_name }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            os_name: windows
+            arch: x64
+            archive: zip
+          - os: macos-latest
+            os_name: macos
+            arch: arm64
+            archive: tar.gz
+          - os: ubuntu-latest
+            os_name: linux
+            arch: x64
+            archive: tar.gz
+    env:
+      WHISPER_TAG: v1.9.5
+      BINARY: vibe-stt-server-${{ matrix.os_name }}-${{ matrix.arch }}
+      ARCHIVE: vibe-stt-server-${{ matrix.os_name }}-${{ matrix.arch }}.${{ matrix.archive }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone whisper.cpp
+        run: git clone --depth 1 --branch ${{ env.WHISPER_TAG }} https://github.com/ggml-org/whisper.cpp.git whisper.cpp
+
+      - name: Configure
+        working-directory: whisper.cpp
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build whisper-server
+        working-directory: whisper.cpp
+        run: cmake --build build --config Release --target whisper-server
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "whisper.cpp/build/bin/Release/whisper-server.exe",
+            "whisper.cpp/build/bin/whisper-server.exe"
+          )
+          $source = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $source) {
+            throw "whisper-server.exe was not found in the build output"
+          }
+          Copy-Item $source "$env:BINARY.exe"
+          Compress-Archive -Path "$env:BINARY.exe" -DestinationPath "$env:ARCHIVE" -Force
+
+      - name: Package (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="whisper.cpp/build/bin/whisper-server"
+          if [ ! -f "$source" ]; then
+            echo "whisper-server was not found in the build output"
+            exit 1
+          fi
+          cp "$source" "$BINARY"
+          chmod +x "$BINARY"
+          tar -czf "$ARCHIVE" "$BINARY"
+
+      - name: Upload to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ github.event.inputs.release_tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+            gh release create "$tag" --title "$tag" --notes "$tag STT server binaries" || true
+          fi
+          gh release upload "$tag" "$ARCHIVE" --clobber
