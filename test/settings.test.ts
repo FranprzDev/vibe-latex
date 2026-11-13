@@ -153,3 +153,11 @@ describe("0.5.1 port migration", () => {
 		expect(s.transcriptionBaseUrl).toBe("http://localhost:9000");
 	});
 });
+
+describe("DEFAULT_CONVERSION_PROMPT_ES symbol vocabulary", () => {
+	it("maps spoken math concepts to LaTeX symbols", () => {
+		for (const needle of ["\\infty", "\\sum", "\\prod", "\\lim_{x \\to a}", "\\sqrt", "\\pi", "\\geq", "\\leq", "\\neq", "\\approx", "\\pm", "\\in", "\\forall", "\\exists", "\\cup", "\\cap", "\\alpha", "\\omega"]) {
+			expect(DEFAULT_CONVERSION_PROMPT_ES).toContain(needle);
+		}
+	});
+});
