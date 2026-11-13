@@ -53,6 +53,13 @@ describe("migrateSettings", () => {
 		expect(migrateSettings({ openaiApiKey: "sk-test" }).previousRemoteSettings).toBeNull();
 	});
 
+	it("defaults streamingInsert to true when absent or invalid", () => {
+		expect(DEFAULT_SETTINGS.streamingInsert).toBe(true);
+		expect(migrateSettings(null).streamingInsert).toBe(true);
+		expect(migrateSettings({ streamingInsert: "yes" }).streamingInsert).toBe(true);
+		expect(migrateSettings({ streamingInsert: false }).streamingInsert).toBe(false);
+	});
+
 	it("keeps a well-formed previousRemoteSettings", () => {
 		const previous = {
 			providerId: "openai",
@@ -159,5 +166,13 @@ describe("DEFAULT_CONVERSION_PROMPT_ES symbol vocabulary", () => {
 		for (const needle of ["\\infty", "\\sum", "\\prod", "\\lim_{x \\to a}", "\\sqrt", "\\pi", "\\geq", "\\leq", "\\neq", "\\approx", "\\pm", "\\in", "\\forall", "\\exists", "\\cup", "\\cap", "\\alpha", "\\omega"]) {
 			expect(DEFAULT_CONVERSION_PROMPT_ES).toContain(needle);
 		}
+	});
+
+	it("maps spoken format commands to Markdown", () => {
+		expect(DEFAULT_CONVERSION_PROMPT_ES).toContain("título");
+		expect(DEFAULT_CONVERSION_PROMPT_ES).toContain("# ");
+		expect(DEFAULT_CONVERSION_PROMPT_ES).toContain("## ");
+		expect(DEFAULT_CONVERSION_PROMPT_ES).toContain("**");
+		expect(DEFAULT_CONVERSION_PROMPT_ES).toContain("- ");
 	});
 });

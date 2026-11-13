@@ -19,6 +19,7 @@ export interface PipelineOptions {
 	audioSeconds?: number;
 	signal?: AbortSignal;
 	onStep?: (step: "transcribing" | "converting") => void;
+	onTranscript?: (transcript: string) => void;
 }
 
 export async function dictatePipeline(
@@ -37,6 +38,7 @@ export async function dictatePipeline(
 	if (!t.text.trim()) {
 		throw new Error("empty transcript");
 	}
+	opts.onTranscript?.(t.text);
 	opts.onStep?.("converting");
 	const c = await provider.convertToLatex(t.text, {
 		systemPrompt: settings.conversionPrompt,

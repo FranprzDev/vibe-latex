@@ -9,6 +9,7 @@ Reglas:
 - En contexto matemático, distingue "e" constante, "igual" de la letra i y "por" de la letra x.
 - Convierte siempre los conceptos matemáticos dictados a su símbolo LaTeX, nunca los dejes como texto: "infinito" → $\\infty$ ("más infinito" → $+\\infty$, "menos infinito" → $-\\infty$), "sumatoria" → $\\sum$, "productoria" → $\\prod$, "límite cuando equis tiende a a" → $\\lim_{x \\to a}$, "raíz cuadrada de" → $\\sqrt{...}$, "raíz enésima" → $\\sqrt[n]{...}$, "pi" → $\\pi$, "valor absoluto" → $|...|$, "mayor o igual" → $\\geq$, "menor o igual" → $\\leq$, "distinto de" → $\\neq$, "aproximadamente igual" → $\\approx$, "más menos" → $\\pm$, "pertenece a" → $\\in$, "para todo" → $\\forall$, "existe" → $\\exists$, "unión" → $\\cup$, "intersección" → $\\cap$, letras griegas dictadas ("alfa", "beta", "gamma", "delta", "épsilon", "theta", "lambda", "mu", "sigma", "tau", "fi", "omega") → $\\alpha$, $\\beta$, $\\gamma$, $\\delta$, $\\epsilon$, $\\theta$, $\\lambda$, $\\mu$, $\\sigma$, $\\tau$, $\\phi$, $\\omega$.
 - "Barra barra" significa un salto de párrafo. Usa \\text{...} para palabras dentro de una fórmula.
+- Reconoce comandos de formato dictados y no conserves la palabra del comando en el texto: "título X" o "esto es un título: X" → una línea de encabezado Markdown \`# X\`; "subtítulo X" → \`## X\`; "lista" seguida de ítems → líneas \`- ítem\`; "negrita X" → \`**X**\`; "cursiva X" → \`*X*\`; "código X" → \`X\` entre comillas invertidas; "cita X" → \`> X\`. Dentro del argumento se siguen aplicando las reglas matemáticas.
 - Si se dicta un gráfico, conserva su descripción como anotación en español; no inventes ni dibujes un gráfico.
 - Devuelve únicamente el texto convertido, sin explicaciones adicionales.`;
 
@@ -39,6 +40,8 @@ export interface LatexVoiceSettings {
 	conversionModel: string;
 	transcriptionContext: string;
 	conversionPrompt: string;
+	/** Inserts the transcript immediately, then swaps it for the converted LaTeX. */
+	streamingInsert: boolean;
 	saveAudio: boolean;
 	audioFolder: string;
 	/** Silence after speech that ends a phrase, in milliseconds. */
@@ -75,6 +78,7 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	conversionModel: "gpt-6-luna",
 	transcriptionContext: DEFAULT_TRANSCRIPTION_CONTEXT_ES,
 	conversionPrompt: DEFAULT_CONVERSION_PROMPT_ES,
+	streamingInsert: true,
 	saveAudio: false,
 	audioFolder: "recordings",
 	silenceMs: 2800,
@@ -168,6 +172,8 @@ export function migrateSettings(
 		settings.conversionPrompt = DEFAULT_CONVERSION_PROMPT_ES;
 	if (isLegacyContext(settings.transcriptionContext))
 		settings.transcriptionContext = DEFAULT_TRANSCRIPTION_CONTEXT_ES;
+	if (typeof settings.streamingInsert !== "boolean")
+		settings.streamingInsert = DEFAULT_SETTINGS.streamingInsert;
 	if (!isLastDictation(settings.lastDictation))
 		settings.lastDictation = null;
 	if (!isPreviousRemoteSettings(settings.previousRemoteSettings))
