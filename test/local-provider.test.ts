@@ -87,6 +87,29 @@ describe("LocalProvider.convertToLatex", () => {
 		expect(body.messages[1].role).toBe("user");
 	});
 
+	it("bounds generation and disables thinking in the request body", async () => {
+		mockFetchOnce({ choices: [{ message: { content: "ok" } }] });
+		await provider.convertToLatex("x", { systemPrompt: "p" });
+		const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1].body as string);
+		expect(body.max_tokens).toBe(1024);
+		expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
+	});
+
+	it("strips inline think blocks from the response", async () => {
+		mockFetchOnce({
+			choices: [{ message: { content: "<think>long hidden reasoning</think>$x^2$" } }],
+		});
+		const out = await provider.convertToLatex("x al cuadrado", { systemPrompt: "p" });
+		expect(out.text).toBe("$x^2$");
+	});
+
+	it("throws when only a think block comes back", async () => {
+		mockFetchOnce({ choices: [{ message: { content: "<think>unfinished" } }] });
+		await expect(
+			provider.convertToLatex("x", { systemPrompt: "p" }),
+		).rejects.toThrow();
+	});
+
 	it("throws when response has no content", async () => {
 		mockFetchOnce({ choices: [] });
 		await expect(
