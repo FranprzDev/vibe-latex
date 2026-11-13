@@ -97,11 +97,13 @@ export default class LatexVoicePlugin extends Plugin {
 		this.addCommand({
 			id: "convert-selection-to-latex",
 			name: "Convertir la selección a LaTeX",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "L" }],
 			editorCallback: (editor) => void this.convertSelectionToLatex(editor),
 		});
 		this.addCommand({
 			id: "paste-clipboard-as-latex",
 			name: "Pegar el portapapeles como LaTeX",
+			hotkeys: [{ modifiers: ["Mod", "Alt"], key: "V" }],
 			editorCallback: (editor) => void this.pasteClipboardAsLatex(editor),
 		});
 		this.addCommand({
@@ -113,11 +115,13 @@ export default class LatexVoicePlugin extends Plugin {
 		this.addCommand({
 			id: "show-server-logs",
 			name: "Ver los registros de los servidores",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "G" }],
 			callback: () => void this.showServerLogs(),
 		});
 		this.addCommand({
 			id: "open-logs-folder",
 			name: "Abrir la carpeta de registros",
+			hotkeys: [{ modifiers: ["Mod", "Alt"], key: "G" }],
 			callback: () => void this.openLogsFolder(),
 		});
 
