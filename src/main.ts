@@ -962,8 +962,8 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 			.setName("Imagen → LaTeX local")
 			.setDesc("Convierte imágenes del portapapeles a LaTeX con un modelo de visión propio, sin nube.")
 			.addDropdown((d) =>
-				d.addOption("450m", "450M (307 MB, recomendado)")
-					.addOption("1.6b", "1.6B (1,2 GB, más calidad)")
+				d.addOption("1.6b", "1.6B (1,2 GB, recomendado)")
+					.addOption("450m", "450M (307 MB, más rápido)")
 					.setValue(size)
 					.onChange(async (v) => {
 						this.plugin.settings.vlModel = v;

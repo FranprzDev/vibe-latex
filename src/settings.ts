@@ -124,7 +124,7 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	graceMs: 10_000,
 	sttPort: 10000,
 	llmPort: 8082,
-	vlModel: "450m",
+	vlModel: "1.6b",
 	localLlmApiKey: "",
 	autoStartLocal: true,
 	usage: { audioSeconds: 0, inputTokens: 0, outputTokens: 0, requests: 0 },
