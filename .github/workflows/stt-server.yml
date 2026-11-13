@@ -4,13 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing release tag to upload the STT server binaries to
+        description: stt-v* release tag to upload the STT server binaries to
         required: true
         type: string
   push:
     tags:
       - "stt-v*"
-      - "[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: write
@@ -102,26 +101,7 @@ jobs:
             tag="${GITHUB_REF_NAME}"
           fi
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --draft --title "$tag" --notes "$tag STT server binaries"
+            gh release create "$tag" --latest=false --title "$tag" --notes "$tag STT server binaries"
           fi
           gh release upload "$tag" "$ARCHIVE" --clobber
 
-  publish:
-    name: Publish release
-    needs: build
-    if: github.event_name == 'push' && startsWith(github.ref_name, 'stt-v') == false
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Publish the draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')
-          if [ "$assets" -lt 7 ]; then
-            echo "Refusing to publish: release has $assets assets, expected 7"
-            exit 1
-          fi
-          gh release edit "$GITHUB_REF_NAME" --draft=false
