@@ -23,10 +23,10 @@ jobs:
 
       # Obsidian community plugins require main.js + manifest.json
       # attached to the GitHub release matching the manifest version.
-      # The release stays a draft until the STT server binaries land
-      # (stt-server.yml publishes it), so installers never see a
-      # release without its download assets.
+      # STT server binaries live in their own stt-v* releases (built
+      # once per whisper.cpp version), so version releases publish
+      # immediately.
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" main.js manifest.json versions.json --generate-notes --verify-tag --draft
+        run: gh release create "$GITHUB_REF_NAME" main.js manifest.json versions.json --generate-notes --verify-tag
