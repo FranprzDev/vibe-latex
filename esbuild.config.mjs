@@ -22,6 +22,7 @@ const context = await esbuild.context({
 		"util",
 		"http",
 		"https",
+		"crypto",
 	],
 	format: "cjs",
 	target: "es2022",

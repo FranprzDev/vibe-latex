@@ -6,6 +6,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
+	buildLlamaArgs,
+	buildSttArgs,
 	INSTALL_STEPS,
 	LocalModeManager,
 	resolveAssets,
@@ -147,6 +149,7 @@ describe("LocalModeManager.install", () => {
 				pluginDir: "vibe-latex",
 				sttPort: 10000,
 				llmPort: 8082,
+				llmApiKey: "test-key",
 			});
 			const events: InstallProgress[] = [];
 			await manager.install((p) => events.push({ ...p }), assetsFor(base));
@@ -196,6 +199,85 @@ describe("LocalModeManager.install", () => {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 			await fs.promises.rm(basePath, { recursive: true, force: true });
 		}
+	});
+
+	it("rejects a download that fails the integrity check and removes the file", async () => {
+		const basePath = await fs.promises.mkdtemp(path.join(os.tmpdir(), "vibe-latex-"));
+		const { server, port } = await startServer();
+		const base = `http://127.0.0.1:${port}`;
+		try {
+			const manager = new LocalModeManager({
+				basePath,
+				pluginDir: "vibe-latex",
+				sttPort: 10000,
+				llmPort: 8082,
+				llmApiKey: "test-key",
+			});
+			const assets: LocalAssets = {
+				stt: { url: `${base}/file`, fileName: "stt.tar.gz", sha256: "0".repeat(64) },
+				llama: { url: `${base}/file`, fileName: "llama.tar.gz" },
+				whisperModel: { url: `${base}/file`, fileName: "ggml-small.bin" },
+				llmModel: { url: `${base}/file`, fileName: "model.gguf" },
+			};
+			await expect(manager.install(undefined, assets)).rejects.toThrow(
+				"no pasó la verificación de integridad",
+			);
+			const partial = path.join(basePath, "vibe-latex", "local", "tmp", "stt.tar.gz");
+			expect(fs.existsSync(partial)).toBe(false);
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+			await fs.promises.rm(basePath, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects an http URL to a remote host", async () => {
+		const basePath = await fs.promises.mkdtemp(path.join(os.tmpdir(), "vibe-latex-"));
+		try {
+			const manager = new LocalModeManager({
+				basePath,
+				pluginDir: "vibe-latex",
+				sttPort: 10000,
+				llmPort: 8082,
+				llmApiKey: "test-key",
+			});
+			const assets: LocalAssets = {
+				stt: { url: "http://example.com/stt.tar.gz", fileName: "stt.tar.gz" },
+				llama: { url: "http://example.com/llama.tar.gz", fileName: "llama.tar.gz" },
+				whisperModel: { url: "http://example.com/ggml-small.bin", fileName: "ggml-small.bin" },
+				llmModel: { url: "http://example.com/model.gguf", fileName: "model.gguf" },
+			};
+			await expect(manager.install(undefined, assets)).rejects.toThrow(
+				"URL de descarga no permitida: http://example.com/stt.tar.gz",
+			);
+		} finally {
+			await fs.promises.rm(basePath, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("spawn arguments", () => {
+	it("builds the whisper.cpp arguments", () => {
+		expect(buildSttArgs("/models/ggml-small.bin", 10000)).toEqual([
+			"-m", "/models/ggml-small.bin",
+			"--host", "127.0.0.1",
+			"--port", "10000",
+		]);
+	});
+
+	it("builds the llama.cpp arguments with the api key and 4096 context", () => {
+		const args = buildLlamaArgs("/models/model.gguf", 8082, "secret");
+		expect(args).toContain("--api-key");
+		expect(args[args.indexOf("--api-key") + 1]).toBe("secret");
+		expect(args).toContain("-c");
+		expect(args[args.indexOf("-c") + 1]).toBe("4096");
+		expect(args).toEqual([
+			"-m", "/models/model.gguf",
+			"--alias", "qwen3.5-9b",
+			"--host", "127.0.0.1",
+			"--port", "8082",
+			"--api-key", "secret",
+			"-c", "4096",
+		]);
 	});
 });
 

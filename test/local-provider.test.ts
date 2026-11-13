@@ -8,6 +8,14 @@ const provider = new LocalProvider({
 	conversionModel: "qwen3.5-9b",
 });
 
+const keyedProvider = new LocalProvider({
+	transcriptionBaseUrl: "http://127.0.0.1:8081",
+	conversionBaseUrl: "http://127.0.0.1:8082/v1",
+	transcriptionModel: "whisper-small",
+	conversionModel: "qwen3.5-9b",
+	apiKey: "secret",
+});
+
 function mockFetchOnce(body: unknown, ok = true, status = 200) {
 	vi.stubGlobal(
 		"fetch",
@@ -91,5 +99,31 @@ describe("LocalProvider.convertToLatex", () => {
 		await expect(
 			provider.convertToLatex("x", { systemPrompt: "p" }),
 		).rejects.toThrow("server down");
+	});
+});
+
+describe("LocalProvider API key", () => {
+	it("sends Authorization: Bearer on both calls when set", async () => {
+		mockFetchOnce({ text: "ok" });
+		await keyedProvider.transcribe(new Blob(["x"], { type: "audio/wav" }), "d.wav", {});
+		const transcribeHeaders = vi.mocked(fetch).mock.calls[0][1].headers as Record<string, string>;
+		expect(transcribeHeaders.Authorization).toBe("Bearer secret");
+
+		mockFetchOnce({ choices: [{ message: { content: "ok" } }] });
+		await keyedProvider.convertToLatex("x", { systemPrompt: "p" });
+		const convertHeaders = vi.mocked(fetch).mock.calls[0][1].headers as Record<string, string>;
+		expect(convertHeaders.Authorization).toBe("Bearer secret");
+	});
+
+	it("omits Authorization when no key is set", async () => {
+		mockFetchOnce({ text: "ok" });
+		await provider.transcribe(new Blob(["x"], { type: "audio/wav" }), "d.wav", {});
+		const transcribeHeaders = vi.mocked(fetch).mock.calls[0][1].headers as Record<string, string>;
+		expect(transcribeHeaders.Authorization).toBeUndefined();
+
+		mockFetchOnce({ choices: [{ message: { content: "ok" } }] });
+		await provider.convertToLatex("x", { systemPrompt: "p" });
+		const convertHeaders = vi.mocked(fetch).mock.calls[0][1].headers as Record<string, string>;
+		expect(convertHeaders.Authorization).toBeUndefined();
 	});
 });

@@ -7,6 +7,7 @@ import {
 	Setting,
 } from "obsidian";
 import type { FileSystemAdapter } from "obsidian";
+import { randomBytes } from "crypto";
 import {
 	dictationReplacementText,
 	verifiedDictationRange,
@@ -36,6 +37,11 @@ export default class LatexVoicePlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
+		if (!this.settings.localLlmApiKey) {
+			this.settings.localLlmApiKey = randomBytes(24).toString("hex");
+			await this.saveSettings();
+		}
+
 		const adapter = this.app.vault?.adapter as FileSystemAdapter | undefined;
 		const basePath = adapter && typeof adapter.getBasePath === "function"
 			? adapter.getBasePath()
@@ -45,6 +51,7 @@ export default class LatexVoicePlugin extends Plugin {
 			pluginDir: this.manifest?.dir ?? ".obsidian/plugins/vibe-latex",
 			sttPort: this.settings.sttPort,
 			llmPort: this.settings.llmPort,
+			llmApiKey: this.settings.localLlmApiKey,
 		});
 
 		if (this.settings.providerId === "local" && this.settings.autoStartLocal) {

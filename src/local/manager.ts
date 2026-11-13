@@ -1,5 +1,6 @@
 import { spawn, execFile } from "child_process";
 import type { ChildProcess } from "child_process";
+import { createHash } from "crypto";
 import { get as httpGet } from "http";
 import { get as httpsGet } from "https";
 import * as fs from "fs";
@@ -10,6 +11,7 @@ export interface LocalModeManagerOptions {
 	pluginDir: string;
 	sttPort: number;
 	llmPort: number;
+	llmApiKey: string;
 }
 
 export interface LocalStatus {
@@ -36,6 +38,7 @@ export const INSTALL_STEPS = [
 interface Asset {
 	url: string;
 	fileName: string;
+	sha256?: string;
 }
 
 export interface LocalAssets {
@@ -48,51 +51,61 @@ export interface LocalAssets {
 const STT_WINDOWS_X64: Asset = {
 	url: "https://github.com/FranprzDev/vibe-latex/releases/latest/download/vibe-stt-server-windows-x64.zip",
 	fileName: "vibe-stt-server-windows-x64.zip",
+	sha256: "e1b6a96f4a5ea2fbc60891256d9cc5cd4e06dcd75e709870527603dddca9cb5b",
 };
 
 const STT_MACOS_ARM64: Asset = {
 	url: "https://github.com/FranprzDev/vibe-latex/releases/latest/download/vibe-stt-server-macos-arm64.tar.gz",
 	fileName: "vibe-stt-server-macos-arm64.tar.gz",
+	sha256: "332cae1f212a1a07019bf6e20f6929f8ac4b41fe601485f6ddeaa20d32b8279e",
 };
 
 const STT_MACOS_X64: Asset = {
 	url: "https://github.com/FranprzDev/vibe-latex/releases/latest/download/vibe-stt-server-macos-x64.tar.gz",
 	fileName: "vibe-stt-server-macos-x64.tar.gz",
+	sha256: "721b088ae29f3644637ce449e219b0c077d9403fc86f3844384895d713557b88",
 };
 
 const STT_LINUX_X64: Asset = {
 	url: "https://github.com/FranprzDev/vibe-latex/releases/latest/download/vibe-stt-server-linux-x64.tar.gz",
 	fileName: "vibe-stt-server-linux-x64.tar.gz",
+	sha256: "82efafd0442558e4dc1744102e89a0e3b7a1843b26c08248d4c3508add6a79ad",
 };
 
 const LLAMA_WIN_X64: Asset = {
 	url: "https://github.com/ggml-org/llama.cpp/releases/download/b12340/llama-b12340-bin-win-vulkan-x64.zip",
 	fileName: "llama-b12340-bin-win-vulkan-x64.zip",
+	sha256: "a2c7a2bfaaf57b5357f84cf584603d088143a5be08c68cb623e6d9bb7db664e8",
 };
 
 const LLAMA_MACOS_ARM64: Asset = {
 	url: "https://github.com/ggml-org/llama.cpp/releases/download/b12340/llama-b12340-bin-macos-arm64.tar.gz",
 	fileName: "llama-b12340-bin-macos-arm64.tar.gz",
+	sha256: "f4414a7224a2fef9e785c8673f0574be78aa914652099b40ef66890f7474e686",
 };
 
 const LLAMA_MACOS_X64: Asset = {
 	url: "https://github.com/ggml-org/llama.cpp/releases/download/b12340/llama-b12340-bin-macos-x64.tar.gz",
 	fileName: "llama-b12340-bin-macos-x64.tar.gz",
+	sha256: "f1e83a37961e69e3468244fa95c98a11f1cdd8f454a4a2bdb094c36c53b4a2ba",
 };
 
 const LLAMA_LINUX_X64: Asset = {
 	url: "https://github.com/ggml-org/llama.cpp/releases/download/b12340/llama-b12340-bin-ubuntu-x64.tar.gz",
 	fileName: "llama-b12340-bin-ubuntu-x64.tar.gz",
+	sha256: "5bc0276548147e56aa03f97b201b1cb3b43cbda6e388f1f2f4c8d82b56313856",
 };
 
 const WHISPER_MODEL: Asset = {
 	url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
 	fileName: "ggml-small.bin",
+	sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
 };
 
 const LLM_MODEL: Asset = {
 	url: "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf",
 	fileName: "Qwen3.5-9B-Q4_K_M.gguf",
+	sha256: "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
 };
 
 const STT_ASSETS: Record<string, Asset> = {
@@ -117,8 +130,48 @@ export function resolveAssets(platform: string, arch: string): LocalAssets | nul
 	return { stt, llama, whisperModel: WHISPER_MODEL, llmModel: LLM_MODEL };
 }
 
+export function buildSttArgs(modelPath: string, port: number): string[] {
+	return [
+		"-m", modelPath,
+		"--host", "127.0.0.1",
+		"--port", String(port),
+	];
+}
+
+export function buildLlamaArgs(modelPath: string, port: number, apiKey: string): string[] {
+	return [
+		"-m", modelPath,
+		"--alias", "qwen3.5-9b",
+		"--host", "127.0.0.1",
+		"--port", String(port),
+		"--api-key", apiKey,
+		"-c", "4096",
+	];
+}
+
 function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isAllowedDownloadUrl(url: string): boolean {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return false;
+	}
+	if (parsed.protocol === "https:") return true;
+	return parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost";
+}
+
+function hashFile(file: string): Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		const hash = createHash("sha256");
+		const stream = fs.createReadStream(file);
+		stream.on("error", reject);
+		stream.on("data", (chunk) => hash.update(chunk));
+		stream.on("end", () => resolve(hash.digest("hex")));
+	});
 }
 
 function isWhisperServer(name: string): boolean {
@@ -173,6 +226,7 @@ export class LocalModeManager {
 	private llmProcess: ChildProcess | null = null;
 	private sttPort: number;
 	private llmPort: number;
+	private llmApiKey: string;
 	private localRoot: string;
 	private sttDir: string;
 	private llamaDir: string;
@@ -181,6 +235,7 @@ export class LocalModeManager {
 	constructor(options: LocalModeManagerOptions) {
 		this.sttPort = options.sttPort;
 		this.llmPort = options.llmPort;
+		this.llmApiKey = options.llmApiKey;
 		this.localRoot = path.join(options.basePath, options.pluginDir, "local");
 		this.sttDir = path.join(this.localRoot, "bin", "stt");
 		this.llamaDir = path.join(this.localRoot, "bin", "llama");
@@ -234,6 +289,10 @@ export class LocalModeManager {
 				};
 
 				const request = (url: string, redirects: number) => {
+					if (!isAllowedDownloadUrl(url)) {
+						fail(new Error(`URL de descarga no permitida: ${url}`));
+						return;
+					}
 					const getter = (url.startsWith("http:") ? httpGet : httpsGet) as typeof httpsGet;
 					const req = getter(url, (res) => {
 						const status = res.statusCode ?? 0;
@@ -261,8 +320,18 @@ export class LocalModeManager {
 						res.on("end", () => {
 							writeChain
 								.then(() => handle.close())
-								.then(() => {
+								.then(async () => {
 									if (settled) return;
+									if (asset.sha256) {
+										const actual = await hashFile(dest);
+										if (actual !== asset.sha256) {
+											await fs.promises.rm(dest, { force: true });
+											fail(new Error(
+												`la descarga de ${step} no pasó la verificación de integridad`,
+											));
+											return;
+										}
+									}
 									settled = true;
 									resolve(dest);
 								})
@@ -379,11 +448,11 @@ export class LocalModeManager {
 		const started: ChildProcess[] = [];
 		try {
 			if (!this.isAlive(this.sttProcess)) {
-				const child = spawn(sttBin, [
-					"-m", whisperModelPath,
-					"--host", "127.0.0.1",
-					"--port", String(this.sttPort),
-				], { detached: false, stdio: "ignore" });
+				const child = spawn(
+					sttBin,
+					buildSttArgs(whisperModelPath, this.sttPort),
+					{ detached: false, stdio: "ignore" },
+				);
 				child.on("exit", () => {
 					if (this.sttProcess === child) this.sttProcess = null;
 				});
@@ -391,21 +460,18 @@ export class LocalModeManager {
 				started.push(child);
 			}
 			if (!this.isAlive(this.llmProcess)) {
-				const child = spawn(llamaBin, [
-					"-m", llmModelPath,
-					"--alias", "qwen3.5-9b",
-					"--host", "127.0.0.1",
-					"--port", String(this.llmPort),
-					"-c", "8192",
-				], { detached: false, stdio: "ignore" });
+				const child = spawn(
+					llamaBin,
+					buildLlamaArgs(llmModelPath, this.llmPort, this.llmApiKey),
+					{ detached: false, stdio: "ignore" },
+				);
 				child.on("exit", () => {
 					if (this.llmProcess === child) this.llmProcess = null;
 				});
 				this.llmProcess = child;
 				started.push(child);
 			}
-			await this.waitForStt();
-			await this.waitForLlm();
+			await Promise.all([this.waitForStt(), this.waitForLlm()]);
 		} catch (error) {
 			for (const child of started) child.kill("SIGKILL");
 			throw error;
