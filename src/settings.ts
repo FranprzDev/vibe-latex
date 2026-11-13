@@ -1,3 +1,4 @@
+import { DEFAULT_GLOSSARY, glossaryToLines } from "./glossary";
 export const DEFAULT_CONVERSION_PROMPT_ES = `Convierte un dictado matemático en español en notas de Obsidian con Markdown y LaTeX.
 
 Reglas:
@@ -12,10 +13,34 @@ Reglas:
 - Reconoce comandos de formato dictados y no conserves la palabra del comando en el texto: "título X" o "esto es un título: X" → una línea de encabezado Markdown \`# X\`; "subtítulo X" → \`## X\`; "lista" seguida de ítems → líneas \`- ítem\`; "negrita X" → \`**X**\`; "cursiva X" → \`*X*\`; "código X" → \`X\` entre comillas invertidas; "cita X" → \`> X\`. Dentro del argumento se siguen aplicando las reglas matemáticas.
 - Si se dicta un gráfico, conserva su descripción como anotación en español; no inventes ni dibujes un gráfico.
 - Las enumeraciones dictadas ("el primero...", "el segundo...", "uno...", "dos...") se escriben como lista numerada con paréntesis: "1) ...", "2) ...", "3) ..." (nunca "1.").
-- Nunca respondas con comentarios, aclaraciones, preguntas ni mensajes sobre el dictado (por ejemplo "no se ha dictado ninguna expresión"). Si no hay contenido para convertir, devuelve la entrada sin cambios. Devuelve únicamente el texto convertido, sin explicaciones adicionales.`;
+- Nunca respondas con comentarios, aclaraciones, preguntas ni mensajes sobre el dictado (por ejemplo "no se ha dictado ninguna expresión"). Si no hay contenido para convertir, devuelve la entrada sin cambios. Devuelve únicamente el texto convertido, sin explicaciones adicionales.
+- No agregues NADA que no esté dictado: ni definiciones, ejemplos, desarrollos, títulos ni fórmulas. Si el dictado es solo una instrucción de formato sin contenido, devuelve únicamente el marcador Markdown correspondiente. Si la entrada es un término, título o frase suelta, devuelve solo eso corregido.
+- Los "..." al inicio o final de una frase son cortes del audio, no pausas retóricas: ignóralos y une la oración con lo que sigue.`;
+
+const PREVIOUS_CONVERSION_PROMPTS: string[] = [
+	`Convierte un dictado matemático en español en notas de Obsidian con Markdown y LaTeX.
+
+Reglas:
+- Escribe cada expresión matemática en LaTeX entre $...$ o $$...$$. Conserva el texto explicativo en español.
+- Mantén el orden y todos los pasos dictados: igualdades sucesivas, sustituciones, descomposiciones, transformadas, límites y conclusiones. No resumas ni saltes pasos.
+- Separa en líneas distintas las transformaciones matemáticas consecutivas. Conserva conectores como "reemplazando", "aplicando la inversa" y "cuando t tiende a infinito" como texto alrededor de las fórmulas.
+- No resuelvas, completes ni corrijas operaciones que no se hayan dictado. Si un símbolo es ambiguo en la transcripción, conserva la formulación en español en vez de adivinarlo.
+- Interpreta homófonos matemáticos: "equis" como x, "de equis" como dx, "i griega" como y, "hache" como h, "eme" como m, "ene" como n, "te" como t y "efe" como f o F según el contexto.
+- En contexto matemático, distingue "e" constante, "igual" de la letra i y "por" de la letra x.
+- Convierte siempre los conceptos matemáticos dictados a su símbolo LaTeX, nunca los dejes como texto: "infinito" → $\\infty$ ("más infinito" → $+\\infty$, "menos infinito" → $-\\infty$), "sumatoria" → $\\sum$, "productoria" → $\\prod$, "límite cuando equis tiende a a" → $\\lim_{x \\to a}$, "raíz cuadrada de" → $\\sqrt{...}$, "raíz enésima" → $\\sqrt[n]{...}$, "pi" → $\\pi$, "valor absoluto" → $|...|$, "mayor o igual" → $\\geq$, "menor o igual" → $\\leq$, "distinto de" → $\\neq$, "aproximadamente igual" → $\\approx$, "más menos" → $\\pm$, "pertenece a" → $\\in$, "para todo" → $\\forall$, "existe" → $\\exists$, "unión" → $\\cup$, "intersección" → $\\cap$, letras griegas dictadas ("alfa", "beta", "gamma", "delta", "épsilon", "theta", "lambda", "mu", "sigma", "tau", "fi", "omega") → $\\alpha$, $\\beta$, $\\gamma$, $\\delta$, $\\epsilon$, $\\theta$, $\\lambda$, $\\mu$, $\\sigma$, $\\tau$, $\\phi$, $\\omega$.
+- "Barra barra" significa un salto de párrafo. Usa \\text{...} para palabras dentro de una fórmula.
+- Reconoce comandos de formato dictados y no conserves la palabra del comando en el texto: "título X" o "esto es un título: X" → una línea de encabezado Markdown \`# X\`; "subtítulo X" → \`## X\`; "lista" seguida de ítems → líneas \`- ítem\`; "negrita X" → \`**X**\`; "cursiva X" → \`*X*\`; "código X" → \`X\` entre comillas invertidas; "cita X" → \`> X\`. Dentro del argumento se siguen aplicando las reglas matemáticas.
+- Si se dicta un gráfico, conserva su descripción como anotación en español; no inventes ni dibujes un gráfico.
+- Las enumeraciones dictadas ("el primero...", "el segundo...", "uno...", "dos...") se escriben como lista numerada con paréntesis: "1) ...", "2) ...", "3) ..." (nunca "1.").
+- Nunca respondas con comentarios, aclaraciones, preguntas ni mensajes sobre el dictado (por ejemplo "no se ha dictado ninguna expresión"). Si no hay contenido para convertir, devuelve la entrada sin cambios. Devuelve únicamente el texto convertido, sin explicaciones adicionales.`,
+];
+
+const PREVIOUS_TRANSCRIPTION_CONTEXTS: string[] = [
+	"Dictado matemático en español: integral, derivada, sumatoria, raíz, fracción, límite, transformada de Laplace, fracciones parciales, alfa, beta, pi, infinito, subíndice, exponente, al cuadrado, tiende a, inversa, numerador, denominador.",
+];
 
 export const DEFAULT_TRANSCRIPTION_CONTEXT_ES =
-	"Dictado matemático en español: integral, derivada, sumatoria, raíz, fracción, límite, transformada de Laplace, fracciones parciales, alfa, beta, pi, infinito, subíndice, exponente, al cuadrado, tiende a, inversa, numerador, denominador.";
+	"Dictado matemático en español: integral, derivada, sumatoria, raíz, fracción, límite, transformada de Laplace, fracciones parciales, alfa, beta, pi, infinito, subíndice, exponente, al cuadrado, tiende a, inversa, numerador, denominador, Routh-Hurwitz, Nyquist, Bode, lugar de las raíces, función de transferencia, polo, cero, PID, espacio de estados, estabilidad, transformada Z.";
 
 export interface LastDictation {
 	filePath: string;
@@ -43,6 +68,9 @@ export interface LatexVoiceSettings {
 	conversionPrompt: string;
 	/** Inserts the transcript immediately, then swaps it for the converted LaTeX. */
 	streamingInsert: boolean;
+	glossary: string[];
+	improveEnabled: boolean;
+	improveUrl: string;
 	saveAudio: boolean;
 	audioFolder: string;
 	/** Silence after speech that ends a phrase, in milliseconds. */
@@ -80,6 +108,9 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	transcriptionContext: DEFAULT_TRANSCRIPTION_CONTEXT_ES,
 	conversionPrompt: DEFAULT_CONVERSION_PROMPT_ES,
 	streamingInsert: true,
+	glossary: glossaryToLines(DEFAULT_GLOSSARY),
+	improveEnabled: false,
+	improveUrl: "https://vibe-latex-improve.franprzdev.workers.dev",
 	saveAudio: false,
 	audioFolder: "recordings",
 	silenceMs: 2800,
@@ -169,10 +200,22 @@ export function migrateSettings(
 		},
 	};
 
-	if (isLegacyPrompt(settings.conversionPrompt))
+	if (isLegacyPrompt(settings.conversionPrompt) ||
+		PREVIOUS_CONVERSION_PROMPTS.includes(settings.conversionPrompt) ||
+		(settings.conversionPrompt.startsWith("Convierte un dictado matemático en español") &&
+			!settings.conversionPrompt.includes("No agregues NADA")))
 		settings.conversionPrompt = DEFAULT_CONVERSION_PROMPT_ES;
-	if (isLegacyContext(settings.transcriptionContext))
+	if (isLegacyContext(settings.transcriptionContext) ||
+		PREVIOUS_TRANSCRIPTION_CONTEXTS.includes(settings.transcriptionContext) ||
+		(settings.transcriptionContext.startsWith("Dictado matemático en español:") &&
+			!settings.transcriptionContext.includes("Routh-Hurwitz")))
 		settings.transcriptionContext = DEFAULT_TRANSCRIPTION_CONTEXT_ES;
+	if (!Array.isArray(settings.glossary) || !settings.glossary.every((g) => typeof g === "string"))
+		settings.glossary = glossaryToLines(DEFAULT_GLOSSARY);
+	if (typeof settings.improveEnabled !== "boolean")
+		settings.improveEnabled = DEFAULT_SETTINGS.improveEnabled;
+	if (typeof settings.improveUrl !== "string")
+		settings.improveUrl = DEFAULT_SETTINGS.improveUrl;
 	if (typeof settings.streamingInsert !== "boolean")
 		settings.streamingInsert = DEFAULT_SETTINGS.streamingInsert;
 	if (!isLastDictation(settings.lastDictation))

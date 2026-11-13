@@ -184,3 +184,52 @@ describe("dictatePipeline", () => {
 		expect(seen).toEqual(["transcribing", "transcribe", "converting", "convert"]);
 	});
 });
+
+describe("0.5.10 guards", () => {
+	it("returns a bare marker for command-only dictation without calling the model", async () => {
+		let converted = false;
+		const provider: VoiceProvider = {
+			...fakeProvider,
+			async transcribe() {
+				return { text: "poneme un subtítulo", durationSeconds: 1 };
+			},
+			async convertToLatex(t, o) {
+				converted = true;
+				return fakeProvider.convertToLatex(t, o);
+			},
+		};
+		const { output } = await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		expect(output).toBe("## ");
+		expect(converted).toBe(false);
+	});
+
+	it("applies the glossary and strips leading ellipsis before converting", async () => {
+		let seen = "";
+		const provider: VoiceProvider = {
+			...fakeProvider,
+			async transcribe() {
+				return { text: "...el criterio de route hardware", durationSeconds: 1 };
+			},
+			async convertToLatex(t, o) {
+				seen = t;
+				return fakeProvider.convertToLatex(t, o);
+			},
+		};
+		await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		expect(seen).toBe("el criterio de Routh-Hurwitz");
+	});
+
+	it("falls back to the raw transcript when conversion returns a meta message", async () => {
+		const provider: VoiceProvider = {
+			...fakeProvider,
+			async transcribe() {
+				return { text: "ruido ambiente", durationSeconds: 1 };
+			},
+			async convertToLatex() {
+				return { text: "No se ha dictado ninguna expresión matemática." };
+			},
+		};
+		const { output } = await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS);
+		expect(output).toBe("ruido ambiente");
+	});
+});
