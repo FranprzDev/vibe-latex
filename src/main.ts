@@ -17,7 +17,7 @@ import {
 } from "./dictation-range";
 import { AudioRecorder, audioExtension } from "./recorder";
 import { createProvider } from "./providers";
-import { convertImageLocal, convertImageToLatex, convertPlainText, dictatePipeline } from "./pipeline";
+import { applyVoiceEdit, convertImageLocal, convertImageToLatex, convertPlainText, dictatePipeline } from "./pipeline";
 import { cleanPdfText, trailingEllipsisLength } from "./text-clean";
 import { friendlyError } from "./errors";
 import { anySignal } from "./abort";
@@ -111,6 +111,12 @@ export default class LatexVoicePlugin extends Plugin {
 			name: "Terminar la frase y convertir ahora",
 			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "D" }],
 			callback: () => this.phraseAbort?.abort(),
+		});
+		this.addCommand({
+			id: "correct-by-voice",
+			name: "Corregir lo último dictado con una instrucción de voz",
+			hotkeys: [{ modifiers: ["Mod", "Alt"], key: "R" }],
+			editorCallback: (editor) => void this.correctByVoice(editor),
 		});
 		this.addCommand({
 			id: "paste-image-as-latex-local",
@@ -234,6 +240,89 @@ export default class LatexVoicePlugin extends Plugin {
 			editor.replaceSelection(output);
 		} catch (e) {
 			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
+		}
+	}
+
+	private async correctByVoice(editor: Editor): Promise<void> {
+		if (this.sessionAbort) {
+			new Notice("Terminá el dictado actual antes de corregir.");
+			return;
+		}
+		const file = this.app.workspace.getActiveFile();
+		const target = this.settings.lastDictation ?? null;
+		let passage = "";
+		let range: { from: number; to: number } | null = null;
+		if (file && target && target.filePath === file.path) {
+			const verified = verifiedDictationRange(editor.getValue(), target);
+			if (verified) {
+				passage = target.text;
+				range = verified;
+			}
+		}
+		if (!range) {
+			const selection = editor.getSelection();
+			if (selection.trim()) passage = selection;
+			else {
+				new Notice("Vibe LaTeX: no encuentro el último dictado. Seleccioná el pasaje a corregir.");
+				return;
+			}
+		}
+		if (this.settings.providerId === "local") {
+			const ready = await this.localManager.ready();
+			if (!ready.stt || !ready.llm) {
+				new Notice("Vibe LaTeX: los servidores locales no responden. Inicialos desde Ajustes.");
+				return;
+			}
+		}
+		const provider = createProvider(this.settings);
+		try {
+			this.updateStatus("escuchando la corrección...");
+			new Notice("Vibe LaTeX: dictá la corrección. Ctrl+Shift+D para terminar antes.");
+			this.phraseAbort = new AbortController();
+			const blob = await this.recorder.capturePhrase({
+				signal: this.phraseAbort.signal,
+				silenceMs: this.settings.silenceMs,
+				graceMs: this.settings.graceMs,
+			});
+			this.phraseAbort = null;
+			if (!blob || blob.size < 800) {
+				new Notice("Vibe LaTeX: no escuché ninguna corrección.");
+				return;
+			}
+			this.updateStatus("transcribiendo...");
+			const t = await provider.transcribe(
+				blob,
+				`phrase.${blob.type.includes("webm") ? "webm" : "m4a"}`,
+				{ language: "es", contextPrompt: this.settings.transcriptionContext },
+			);
+			const instruction = t.text.trim();
+			if (!instruction) {
+				new Notice("Vibe LaTeX: no entendí la corrección dictada.");
+				return;
+			}
+			this.updateStatus("aplicando la corrección...");
+			const rewritten = await applyVoiceEdit(provider, passage, instruction);
+			if (!rewritten) {
+				new Notice("Vibe LaTeX: el modelo no devolvió una corrección usable.");
+				return;
+			}
+			if (range && file) {
+				editor.replaceRange(rewritten, editor.offsetToPos(range.from), editor.offsetToPos(range.to));
+				this.setLastDictation({
+					filePath: file.path,
+					from: range.from,
+					to: range.from + rewritten.length,
+					text: rewritten,
+				});
+			} else {
+				editor.replaceSelection(rewritten);
+			}
+			new Notice("Vibe LaTeX: corrección aplicada.");
+		} catch (e) {
+			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
+		} finally {
+			this.phraseAbort = null;
+			this.updateStatus("");
 		}
 	}
 
