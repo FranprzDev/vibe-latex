@@ -4,13 +4,18 @@ Todos los cambios relevantes de Vibe LaTeX se documentan acá. El formato sigue
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el versionado es
 [SemVer](https://semver.org/lang/es/).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-12
 
 ### Agregado
 - URLs base separadas para transcripción y conversión.
 - La clave API es opcional al usar endpoints locales compatibles con OpenAI.
 - Botones de **Configuración rápida** ("OpenAI" y "Local gratis") en los ajustes.
 - Sección de modo local gratis, sin OpenAI, en el README.
+- Script `scripts/local_stt.py` para transcribir en local sin Docker.
+- Sección de instalación con BRAT en el README.
+
+### Cambiado
+- Los tags de release van sin prefijo `v` (requisito del listado oficial de Obsidian).
 
 ## [0.3.0] - 2026-10-03
 
