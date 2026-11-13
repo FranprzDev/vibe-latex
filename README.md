@@ -19,12 +19,34 @@ Para corregir el último fragmento, ejecutá **Vibe LaTeX: Corregir la última f
 - Vocabulario matemático hablado, como “equis”, “i griega”, “de equis”, “alfa” e “infinito”.
 - Anotaciones de gráficos descriptas en voz.
 
-El plugin convierte lo que se dicta; no debe completar ni corregir pasos matemáticos que no se hayan dicho. La conversión requiere una clave API de OpenAI. El servicio puede cobrar el uso según la cuenta del usuario.
+El plugin convierte lo que se dicta; no debe completar ni corregir pasos matemáticos que no se hayan dicho. La conversión usa la API de OpenAI por defecto, o un endpoint local gratuito (ver **Modo local**). OpenAI puede cobrar el uso según la cuenta del usuario.
+
+## Modo local (gratis, sin OpenAI)
+
+Podés usar el plugin sin clave ni costos con servidores locales compatibles con la API de OpenAI.
+
+1. Instalá [Ollama](https://ollama.com) (Windows, Mac o Linux) y descargá el modelo de conversión:
+
+   ```bash
+   ollama pull qwen2.5:7b
+   ```
+
+2. Instalá [Speaches](https://github.com/speaches-ai/speaches) para la transcripción de voz:
+
+   ```bash
+   docker run -p 8000:8000 ghcr.io/speaches-ai/speaches:latest-cpu
+   ```
+
+   También podés usar un servidor de whisper.cpp para el reconocimiento de voz.
+
+3. En **Ajustes → Vibe LaTeX**, presioná el botón rápido **Local gratis**. Alternativamente, configurá **URL de transcripción** en `http://localhost:8000/v1` y **URL de conversión** en `http://localhost:11434/v1`, dejá la clave API vacía, usá el modelo de transcripción `Systran/faster-whisper-small` y el modelo de conversión `qwen2.5:7b`.
+
+La calidad de conversión con modelos locales de 7B es inferior a la de OpenAI. Si tenés una GPU de 8 GB o más, un modelo más grande como `qwen2.5:14b` produce mejor LaTeX matemático en español.
 
 ## Configuración
 
 1. Instalá y habilitá el plugin.
-2. En **Ajustes → Vibe LaTeX**, ingresá tu clave API de OpenAI.
+2. En **Ajustes → Vibe LaTeX**, ingresá tu clave de OpenAI, o presioná **Local gratis** para usar endpoints locales sin clave.
 3. Permití el acceso al micrófono cuando Obsidian o el sistema lo soliciten.
 
 Opcional: ajustá la **duración de la pausa** que separa cada frase y la

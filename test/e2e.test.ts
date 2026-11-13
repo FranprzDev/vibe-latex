@@ -38,7 +38,8 @@ function settingsFor(): LatexVoiceSettings {
 
 const provider = new OpenAIProvider({
 	apiKey: apiKey ?? "",
-	baseUrl: DEFAULT_SETTINGS.openaiBaseUrl,
+	transcriptionBaseUrl: DEFAULT_SETTINGS.transcriptionBaseUrl,
+	conversionBaseUrl: DEFAULT_SETTINGS.conversionBaseUrl,
 	transcriptionModel: DEFAULT_SETTINGS.transcriptionModel,
 	conversionModel: DEFAULT_SETTINGS.conversionModel,
 });

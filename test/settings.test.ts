@@ -5,6 +5,7 @@ import {
 	DEFAULT_SETTINGS,
 	DEFAULT_TRANSCRIPTION_CONTEXT_ES,
 	migrateSettings,
+	needsApiKey,
 } from "../src/settings";
 
 describe("Spanish math dictation defaults", () => {
@@ -64,6 +65,33 @@ describe("migrateSettings", () => {
 		expect(s.silenceMs).toBe(500);
 		expect(s.maxPhraseMs).toBe(DEFAULT_SETTINGS.maxPhraseMs);
 		expect(s.graceMs).toBe(60_000);
+	});
+
+	it("migrates the legacy openaiBaseUrl into both new URLs", () => {
+		const s = migrateSettings({ openaiBaseUrl: "http://localhost:9999/v1" });
+		expect(s.transcriptionBaseUrl).toBe("http://localhost:9999/v1");
+		expect(s.conversionBaseUrl).toBe("http://localhost:9999/v1");
+		expect(s).not.toHaveProperty("openaiBaseUrl");
+	});
+
+	it("uses default URLs when data is null", () => {
+		const s = migrateSettings(null);
+		expect(s.transcriptionBaseUrl).toBe("https://api.openai.com/v1");
+		expect(s.conversionBaseUrl).toBe("https://api.openai.com/v1");
+	});
+});
+
+describe("needsApiKey", () => {
+	it("is true with default settings", () => {
+		expect(needsApiKey(DEFAULT_SETTINGS)).toBe(true);
+	});
+
+	it("is false when both URLs point to localhost", () => {
+		expect(needsApiKey({
+			...DEFAULT_SETTINGS,
+			transcriptionBaseUrl: "http://localhost:8000/v1",
+			conversionBaseUrl: "http://localhost:11434/v1",
+		})).toBe(false);
 	});
 });
 

@@ -8,7 +8,8 @@ export function createProvider(settings: LatexVoiceSettings): VoiceProvider {
 		default:
 			return new OpenAIProvider({
 				apiKey: settings.openaiApiKey,
-				baseUrl: settings.openaiBaseUrl,
+				transcriptionBaseUrl: settings.transcriptionBaseUrl,
+				conversionBaseUrl: settings.conversionBaseUrl,
 				transcriptionModel: settings.transcriptionModel,
 				conversionModel: settings.conversionModel,
 			});

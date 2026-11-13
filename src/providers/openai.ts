@@ -9,7 +9,8 @@ import { anySignal } from "../abort";
 
 export interface OpenAIProviderConfig {
 	apiKey: string;
-	baseUrl: string;
+	transcriptionBaseUrl: string;
+	conversionBaseUrl: string;
 	transcriptionModel: string;
 	conversionModel: string;
 }
@@ -32,15 +33,22 @@ export class OpenAIProvider implements VoiceProvider {
 
 	constructor(private config: OpenAIProviderConfig) {}
 
-	private get url(): string {
-		return this.config.baseUrl.replace(/\/+$/, "");
+	private get transcriptionUrl(): string {
+		return this.config.transcriptionBaseUrl.replace(/\/+$/, "");
+	}
+
+	private get conversionUrl(): string {
+		return this.config.conversionBaseUrl.replace(/\/+$/, "");
 	}
 
 	private headers(extra?: Record<string, string>): Record<string, string> {
-		return {
-			Authorization: `Bearer ${this.config.apiKey}`,
-			...extra,
-		};
+		if (this.config.apiKey) {
+			return {
+				Authorization: `Bearer ${this.config.apiKey}`,
+				...extra,
+			};
+		}
+		return { ...extra };
 	}
 
 	async transcribe(audio: Blob, filename: string, opts: TranscribeOptions): Promise<TranscriptionResult> {
@@ -54,7 +62,7 @@ export class OpenAIProvider implements VoiceProvider {
 			form.append("prompt", opts.contextPrompt);
 		}
 
-		const res = await fetch(`${this.url}/audio/transcriptions`, {
+		const res = await fetch(`${this.transcriptionUrl}/audio/transcriptions`, {
 			method: "POST",
 			headers: this.headers(),
 			body: form,
@@ -69,7 +77,7 @@ export class OpenAIProvider implements VoiceProvider {
 	}
 
 	async convertToLatex(transcript: string, opts: ConvertOptions): Promise<ConvertResult> {
-		const res = await fetch(`${this.url}/chat/completions`, {
+		const res = await fetch(`${this.conversionUrl}/chat/completions`, {
 			method: "POST",
 			headers: this.headers({ "Content-Type": "application/json" }),
 			body: JSON.stringify({
