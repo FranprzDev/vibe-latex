@@ -68,7 +68,7 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	silenceMs: 2800,
 	maxPhraseMs: 60_000,
 	graceMs: 10_000,
-	sttPort: 8081,
+	sttPort: 10000,
 	llmPort: 8082,
 	autoStartLocal: true,
 	usage: { audioSeconds: 0, inputTokens: 0, outputTokens: 0, requests: 0 },
@@ -118,6 +118,10 @@ export function migrateSettings(
 ): LatexVoiceSettings {
 	const data = { ...(raw ?? {}) };
 	delete data.language;
+
+	if (data.sttPort === 8081) data.sttPort = DEFAULT_SETTINGS.sttPort;
+	if (data.transcriptionBaseUrl === "http://127.0.0.1:8081")
+		data.transcriptionBaseUrl = `http://127.0.0.1:${DEFAULT_SETTINGS.sttPort}`;
 
 	if (typeof data.openaiBaseUrl === "string" && data.openaiBaseUrl !== "") {
 		if (typeof data.transcriptionBaseUrl !== "string" || data.transcriptionBaseUrl === "")

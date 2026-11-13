@@ -64,7 +64,7 @@ describe("resolveAssets", () => {
 
 describe("local mode settings", () => {
 	it("ships local mode defaults", () => {
-		expect(DEFAULT_SETTINGS.sttPort).toBe(8081);
+		expect(DEFAULT_SETTINGS.sttPort).toBe(10000);
 		expect(DEFAULT_SETTINGS.llmPort).toBe(8082);
 		expect(DEFAULT_SETTINGS.autoStartLocal).toBe(true);
 	});
