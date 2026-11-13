@@ -141,7 +141,7 @@ export default class LatexVoicePlugin extends Plugin {
 		}
 	}
 
-	private async showServerLogs(): Promise<void> {
+	async showServerLogs(): Promise<void> {
 		const logs = await this.localManager.logsTail();
 		new ServerLogsModal(this.app, logs).open();
 	}
@@ -598,8 +598,7 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 	private lastSampleTime: number | null = null;
 	private lastSampleBytes = 0;
 	private speedBytesPerSecond = 0;
-	private vlDownloading = false;
-	private vlSetting: Setting | null = null;
+	private advancedOpen = false;
 
 	constructor(app: App, private plugin: LatexVoicePlugin) {
 		super(app, plugin);
@@ -697,6 +696,9 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		const running = status.running.stt && status.running.llm;
 		const row = section.createDiv();
 		const toggle = row.createEl("button", { text: running ? "Detener" : "Iniciar" });
+		const logsButton = row.createEl("button", { text: "Ver registros" });
+		logsButton.style.marginLeft = "8px";
+		logsButton.onclick = () => void this.plugin.showServerLogs();
 		toggle.onclick = async () => {
 			toggle.disabled = true;
 			try {
@@ -923,14 +925,14 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		header.style.cursor = "pointer";
 		header.style.fontWeight = "bold";
 		header.style.marginTop = "16px";
-		const chevron = header.createSpan({ text: "▸" });
+		const chevron = header.createSpan({ text: this.advancedOpen ? "▾" : "▸" });
 		header.createSpan({ text: " Avanzado" });
 		const content = container.createDiv();
-		content.style.display = "none";
+		content.style.display = this.advancedOpen ? "block" : "none";
 		header.onclick = () => {
-			const expanded = content.style.display !== "none";
-			content.style.display = expanded ? "none" : "block";
-			chevron.setText(expanded ? "▸" : "▾");
+			this.advancedOpen = !this.advancedOpen;
+			content.style.display = this.advancedOpen ? "block" : "none";
+			chevron.setText(this.advancedOpen ? "▾" : "▸");
 		};
 
 		this.renderServerGroup(content, status);
@@ -944,13 +946,6 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 	}
 
 	private renderVisionGroup(container: HTMLElement, installed: boolean): void {
-		this.vlSetting = null;
-		if (this.vlDownloading) {
-			this.vlSetting = new Setting(container)
-				.setName("Imagen → LaTeX local")
-				.setDesc("Descargando el modelo de visión...");
-			return;
-		}
 		if (installed) {
 			new Setting(container)
 				.setName("Imagen → LaTeX local")
@@ -958,41 +953,47 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 			return;
 		}
 		const size: VlModelSize = this.plugin.settings.vlModel === "1.6b" ? "1.6b" : "450m";
-		new Setting(container)
+		const setting = new Setting(container)
 			.setName("Imagen → LaTeX local")
-			.setDesc("Convierte imágenes del portapapeles a LaTeX con un modelo de visión propio, sin nube.")
-			.addDropdown((d) =>
-				d.addOption("1.6b", "1.6B (1,2 GB, recomendado)")
-					.addOption("450m", "450M (307 MB, más rápido)")
-					.setValue(size)
-					.onChange(async (v) => {
-						this.plugin.settings.vlModel = v;
-						await this.plugin.saveSettings();
-						this.display();
-					})
-			)
-			.addButton((b) =>
-				b.setButtonText("Descargar").onClick(() => void this.downloadVl())
-			);
+			.setDesc("Convierte imágenes del portapapeles a LaTeX, 100% local.");
+		setting.addDropdown((d) =>
+			d.addOption("1.6b", "1.6B (1,2 GB, recomendado)")
+				.addOption("450m", "450M (307 MB, más rápido)")
+				.setValue(size)
+				.onChange(async (v) => {
+					this.plugin.settings.vlModel = v;
+					await this.plugin.saveSettings();
+					this.display();
+				})
+		);
+		setting.addButton((b) =>
+			b.setButtonText("Descargar").onClick(() => {
+				b.setButtonText("Descargando...").setDisabled(true);
+				setting.setDesc("Descargando el modelo de visión... 0%");
+				void this.downloadVl(size, setting, b);
+			})
+		);
 	}
 
-	private async downloadVl(): Promise<void> {
-		const size: VlModelSize = this.plugin.settings.vlModel === "1.6b" ? "1.6b" : "450m";
-		this.vlDownloading = true;
-		this.display();
+	private async downloadVl(
+		size: VlModelSize,
+		setting: Setting,
+		button: { setButtonText(t: string): unknown; setDisabled(d: boolean): unknown },
+	): Promise<void> {
 		try {
 			await this.plugin.localManager.installVl(size, (p) => {
-				if (p.totalBytes && this.vlSetting) {
+				if (p.totalBytes) {
 					const pct = Math.round((p.downloadedBytes / p.totalBytes) * 100);
-					this.vlSetting.setDesc(`Descargando el modelo de visión... ${pct}%`);
+					setting.setDesc(`Descargando el modelo de visión... ${pct}%`);
 				}
 			});
 			new Notice("Vibe LaTeX: modelo de visión instalado.");
+			this.display();
 		} catch (e) {
 			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
-		} finally {
-			this.vlDownloading = false;
-			this.display();
+			setting.setDesc("Convierte imágenes del portapapeles a LaTeX, 100% local.");
+			button.setButtonText("Descargar");
+			button.setDisabled(false);
 		}
 	}
 
@@ -1231,11 +1232,10 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		this.subHeader(container, "Corrección de términos");
 		const s = this.plugin.settings;
 
-
 		new Setting(container)
-			.setName("Revisar con la nube")
+			.setName("Revisar con la nube (opcional)")
 			.setDesc(
-				"Envía cada resultado a un worker gratuito que corrige términos técnicos mal transcritos sin agregar contenido. También habilita pegar imágenes del portapapeles como LaTeX. Si falla, se usa el texto original.",
+				"Apagado por defecto. Si lo activás, un worker gratuito y fijo (tu propio Cloudflare, sin costo) corrige términos mal transcritos y habilita pegar imágenes por nube. El dictado y la conversión siguen 100% locales.",
 			)
 			.addToggle((t) =>
 				t.setValue(s.improveEnabled).onChange(async (v) => {
@@ -1246,22 +1246,10 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 
 		new Setting(container)
 			.setName("Convertir siempre con el modelo")
-			.setDesc(
-				"Apagado (recomendado): el texto sin matemática ni formato se inserta directo, sin esperar al modelo.",
-			)
+			.setDesc("Apagado: el texto sin matemática se inserta directo, sin esperar al modelo.")
 			.addToggle((t) =>
 				t.setValue(s.alwaysConvert).onChange(async (v) => {
 					s.alwaysConvert = v;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(container)
-			.setName("URL del worker")
-			.setDesc("Endpoint del paso de revisión.")
-			.addText((t) =>
-				t.setValue(s.improveUrl).onChange(async (v) => {
-					s.improveUrl = v.trim();
 					await this.plugin.saveSettings();
 				}),
 			);
