@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { cleanVisionLatex, dictatePipeline } from "../src/pipeline";
+import { applyVoiceEdit, buildEditUserText, cleanVisionLatex, dictatePipeline } from "../src/pipeline";
 import { VoiceProvider } from "../src/providers";
 import { DEFAULT_SETTINGS } from "../src/settings";
 
@@ -350,5 +350,38 @@ describe("cleanVisionLatex", () => {
 		expect(
 			cleanVisionLatex("\\documentclass{article}\n\\begin{document}\n\\frac{a}{b}\n\\end{document}"),
 		).toBe("\\frac{a}{b}");
+	});
+});
+
+describe("applyVoiceEdit", () => {
+	it("sends the passage and instruction to the model and returns the rewrite", async () => {
+		let seen = "";
+		const provider: VoiceProvider = {
+			...fakeProvider,
+			async convertToLatex(text: string) {
+				seen = text;
+				return { text: "1) uno\n2) dos" };
+			},
+		};
+		const out = await applyVoiceEdit(provider, "uno dos", "ponelo como lista numerada");
+		expect(out).toBe("1) uno\n2) dos");
+		expect(seen).toContain("PASAJE:\nuno dos");
+		expect(seen).toContain("INSTRUCCIÓN:\nponelo como lista numerada");
+	});
+
+	it("returns null when the model answers with meta text", async () => {
+		const provider: VoiceProvider = {
+			...fakeProvider,
+			async convertToLatex() {
+				return { text: "No se ha dictado ninguna expresión matemática." };
+			},
+		};
+		expect(await applyVoiceEdit(provider, "x = 1", "cambiá la equis por z")).toBeNull();
+	});
+});
+
+describe("buildEditUserText", () => {
+	it("joins passage and instruction with markers", () => {
+		expect(buildEditUserText("a", "b")).toBe("PASAJE:\na\n\nINSTRUCCIÓN:\nb");
 	});
 });

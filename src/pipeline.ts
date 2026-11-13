@@ -152,6 +152,32 @@ export async function convertPlainText(
 	return maybeImprove(output, settings);
 }
 
+export const EDIT_SYSTEM_PROMPT = `Recibís un pasaje de notas de estudio en Markdown con LaTeX y una instrucción de corrección dictada por voz, en español.
+Reglas estrictas:
+- Aplicá ÚNICAMENTE lo que pide la instrucción sobre el pasaje: correcciones de valores, signos, términos, orden o formato pedidos explícitamente.
+- NUNCA agregues contenido nuevo: ni definiciones, ejemplos, pasos ni fórmulas que la instrucción no pida.
+- Conservá el formato Markdown y las fórmulas LaTeX ($...$, $$...$$) salvo que la instrucción pida cambiarlos.
+- Si la instrucción es ambigua, aplicá la interpretación más literal.
+- Devolvé ÚNICAMENTE el pasaje reescrito, sin explicaciones, comentarios ni texto adicional.`;
+
+export function buildEditUserText(passage: string, instruction: string): string {
+	return `PASAJE:\n${passage}\n\nINSTRUCCIÓN:\n${instruction}`;
+}
+
+export async function applyVoiceEdit(
+	provider: VoiceProvider,
+	passage: string,
+	instruction: string,
+): Promise<string | null> {
+	const c = await provider.convertToLatex(buildEditUserText(passage, instruction), {
+		systemPrompt: EDIT_SYSTEM_PROMPT,
+		maxTokens: Math.min(4096, Math.max(1024, Math.ceil(passage.length / 2) + 256)),
+	});
+	const out = c.text.trim();
+	if (!out || looksLikeMetaResponse(out)) return null;
+	return out;
+}
+
 export async function convertImageToLatex(
 	imageBase64: string,
 	settings: LatexVoiceSettings,
