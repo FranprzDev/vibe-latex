@@ -3,7 +3,8 @@ import { OpenAIProvider } from "../src/providers/openai";
 
 const provider = new OpenAIProvider({
 	apiKey: "sk-test",
-	baseUrl: "https://api.openai.com/v1",
+	transcriptionBaseUrl: "https://api.openai.com/v1",
+	conversionBaseUrl: "https://api.openai.com/v1",
 	transcriptionModel: "gpt-transcribe",
 	conversionModel: "gpt-6-luna",
 });
@@ -46,6 +47,21 @@ describe("OpenAIProvider.transcribe", () => {
 			provider.transcribe(new Blob(["x"]), "d.m4a", {}),
 		).rejects.toThrow("bad key");
 	});
+
+	it("omits the Authorization header when apiKey is empty", async () => {
+		const local = new OpenAIProvider({
+			apiKey: "",
+			transcriptionBaseUrl: "https://api.openai.com/v1",
+			conversionBaseUrl: "https://api.openai.com/v1",
+			transcriptionModel: "gpt-transcribe",
+			conversionModel: "gpt-6-luna",
+		});
+		mockFetchOnce({ text: "hola" });
+		await local.transcribe(new Blob(["x"]), "d.m4a", {});
+		const init = vi.mocked(fetch).mock.calls[0][1];
+		const headers = init.headers as Record<string, string>;
+		expect(headers.Authorization).toBeUndefined();
+	});
 });
 
 describe("OpenAIProvider.convertToLatex", () => {
@@ -72,5 +88,27 @@ describe("OpenAIProvider.convertToLatex", () => {
 		await expect(
 			provider.convertToLatex("x", { systemPrompt: "p" }),
 		).rejects.toThrow();
+	});
+});
+
+describe("OpenAIProvider base URLs", () => {
+	it("uses separate transcription and conversion URLs", async () => {
+		const split = new OpenAIProvider({
+			apiKey: "",
+			transcriptionBaseUrl: "http://localhost:8000/v1/",
+			conversionBaseUrl: "http://localhost:11434/v1/",
+			transcriptionModel: "whisper",
+			conversionModel: "qwen",
+		});
+		mockFetchOnce({ text: "integral" });
+		await split.transcribe(new Blob(["x"]), "d.m4a", {});
+		expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
+			"http://localhost:8000/v1/audio/transcriptions",
+		);
+		mockFetchOnce({ choices: [{ message: { content: "ok" } }] });
+		await split.convertToLatex("integral", { systemPrompt: "p" });
+		expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
+			"http://localhost:11434/v1/chat/completions",
+		);
 	});
 });
