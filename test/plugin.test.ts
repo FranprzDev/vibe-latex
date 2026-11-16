@@ -20,7 +20,7 @@ vi.mock("obsidian", () => {
 		addRibbonIcon() {
 			return {};
 		}
-		addCommand(cmd: { id: string; name: string }) {
+		addCommand(cmd: { id: string; name: string; hotkeys?: unknown }) {
 			this.commands.push(cmd);
 			return cmd;
 		}
@@ -78,9 +78,15 @@ describe("LatexVoicePlugin smoke", () => {
 		const plugin = new LatexVoicePlugin({} as never, {} as never);
 		vi.stubGlobal("document", {});
 		await plugin.onload();
-		const ids = (plugin as unknown as { commands: { id: string }[] }).commands.map((c) => c.id);
+		const commands = (plugin as unknown as { commands: { id: string; hotkeys?: unknown }[] }).commands;
+		const ids = commands.map((c) => c.id);
 		expect(ids).toContain("toggle-dictation");
 		expect(ids).toContain("correct-last-dictation");
+		const reportCmd = commands.find((c) => c.id === "report-problem");
+		expect(reportCmd).toBeDefined();
+		expect(reportCmd?.hotkeys).toBeUndefined();
+		const correctCmd = commands.find((c) => c.id === "correct-last-dictation");
+		expect(correctCmd?.hotkeys).toEqual([{ modifiers: ["Mod", "Shift"], key: "R" }]);
 		expect(() => plugin.onunload()).not.toThrow();
 	});
 });

@@ -69,6 +69,9 @@ export async function diagnoseFeedback(
 	report: FeedbackReport,
 	signal?: AbortSignal,
 ): Promise<string> {
+	if (signal?.aborted) {
+		throw new DOMException("The operation was aborted.", "AbortError");
+	}
 	const input = {
 		description: report.description,
 		context: report.context,
@@ -79,7 +82,13 @@ export async function diagnoseFeedback(
 		signal,
 		maxTokens: 1024,
 	});
+	if (signal?.aborted) {
+		throw new DOMException("The operation was aborted.", "AbortError");
+	}
 	const diagnosis = result.text.trim().slice(0, 12000);
+	if (!diagnosis) {
+		throw new Error("No se pudo diagnosticar.");
+	}
 	report.diagnosis = diagnosis;
 	return diagnosis;
 }

@@ -86,6 +86,40 @@ describe("diagnoseFeedback", () => {
 		const out = await diagnoseFeedback(provider, report);
 		expect(out.length).toBe(12000);
 	});
+
+	it("throws AbortError when signal already aborted", async () => {
+		const provider = { convertToLatex: vi.fn() } as any;
+		const report = createFeedbackReport("d", "v");
+		const controller = new AbortController();
+		controller.abort();
+		await expect(diagnoseFeedback(provider, report, controller.signal)).rejects.toMatchObject({
+			name: "AbortError",
+		});
+		expect(provider.convertToLatex).not.toHaveBeenCalled();
+		expect(report.diagnosis).toBeUndefined();
+	});
+
+	it("ignores provider response when aborted", async () => {
+		const controller = new AbortController();
+		const provider = {
+			convertToLatex: vi.fn().mockImplementation(async () => {
+				controller.abort();
+				return { text: "diag" };
+			}),
+		} as any;
+		const report = createFeedbackReport("d", "v");
+		await expect(diagnoseFeedback(provider, report, controller.signal)).rejects.toMatchObject({
+			name: "AbortError",
+		});
+		expect(report.diagnosis).toBeUndefined();
+	});
+
+	it("rejects empty diagnosis", async () => {
+		const provider = { convertToLatex: vi.fn().mockResolvedValue({ text: "   " }) } as any;
+		const report = createFeedbackReport("d", "v");
+		await expect(diagnoseFeedback(provider, report)).rejects.toThrow("No se pudo diagnosticar.");
+		expect(report.diagnosis).toBeUndefined();
+	});
 });
 
 describe("serializeFeedback", () => {

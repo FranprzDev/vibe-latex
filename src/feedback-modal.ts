@@ -147,7 +147,7 @@ export class FeedbackModal extends Modal {
 		const hasReport = !!this.report;
 		if (this.dictateBtn) this.dictateBtn.disabled = this.busy;
 		if (this.prepareBtn) this.prepareBtn.disabled = this.busy;
-		if (this.diagnoseBtn) this.diagnoseBtn.disabled = this.busy || !hasReport;
+		if (this.diagnoseBtn) this.diagnoseBtn.disabled = this.busy || !hasReport || this.saved;
 		if (this.saveBtn) this.saveBtn.disabled = this.busy || !hasReport || this.saved;
 		if (this.copyBtn) this.copyBtn.disabled = this.busy || !hasReport;
 		if (this.cancelBtn) this.cancelBtn.disabled = !this.busy;
@@ -256,7 +256,7 @@ export class FeedbackModal extends Modal {
 	}
 
 	private async handleDiagnose(): Promise<void> {
-		if (this.busy || !this.report) return;
+		if (this.busy || !this.report || this.saved) return;
 		this.setBusy(true);
 		const controller = new AbortController();
 		this.abortController = controller;
@@ -284,7 +284,7 @@ export class FeedbackModal extends Modal {
 	}
 
 	private async handleSave(): Promise<void> {
-		if (this.busy || !this.report) return;
+		if (this.busy || !this.report || this.saved) return;
 		this.setBusy(true);
 		const controller = new AbortController();
 		this.abortController = controller;
@@ -297,7 +297,7 @@ export class FeedbackModal extends Modal {
 			this.saved = true;
 			this.savedPath = path;
 			if (this.savedPathEl) this.savedPathEl.setText(path);
-			if (this.statusEl) this.statusEl.setText("Reporte guardado.");
+			if (this.statusEl) this.statusEl.setText("Guardado localmente. Copiá y pegá manualmente para compartir.");
 			this.updateControls();
 		} catch (e) {
 			if (signal.aborted) {
