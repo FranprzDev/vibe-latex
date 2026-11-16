@@ -18,6 +18,9 @@ import {
 } from "./dictation-range";
 import { AudioRecorder, audioExtension } from "./recorder";
 import { createProvider } from "./providers";
+import { LocalProvider } from "./providers/local";
+import FeedbackModal from "./feedback-modal";
+import { createFeedbackReport, diagnoseFeedback, serializeFeedback, type FeedbackContext } from "./feedback";
 import { applyVoiceEdit, convertImageLocal, convertImageToLatex, convertPlainText, dictatePipeline } from "./pipeline";
 import { cleanPdfText } from "./text-clean";
 import { TypingGuard } from "./typing-guard";
@@ -40,9 +43,12 @@ export default class LatexVoicePlugin extends Plugin {
 	private statusBarEl!: HTMLElement;
 	private sessionAbort: AbortController | null = null;
 	private phraseAbort: AbortController | null = null;
+	private feedbackAbort: AbortController | null = null;
 	private sessionRange: { filePath: string; from: number; to: number } | null = null;
 	private pendingSave: Promise<void> = Promise.resolve();
 	private guard = new TypingGuard();
+	private lastFeedbackContext?: FeedbackContext;
+	private feedbackModal?: FeedbackModal;
 	async onload() {
 		await this.loadSettings();
 
@@ -143,6 +149,18 @@ export default class LatexVoicePlugin extends Plugin {
 			callback: () => void this.openLogsFolder(),
 		});
 
+		this.addCommand({
+			id: "report-problem",
+			name: "Reportar un problema (feedback local)",
+			callback: () => void this.reportProblemByVoice(),
+		});
+
+		this.addCommand({
+			id: "prepare-feedback-manually",
+			name: "Preparar reporte de feedback manualmente",
+			callback: () => void this.openFeedbackReport(),
+		});
+
 		this.addSettingTab(new LatexVoiceSettingTab(this.app, this));
 
 		if (!this.settings.openaiApiKey && needsApiKey(this.settings) && !this.settings.devMode) {
@@ -156,6 +174,191 @@ export default class LatexVoicePlugin extends Plugin {
 	async showServerLogs(): Promise<void> {
 		const logs = await this.localManager.logsTail();
 		new ServerLogsModal(this.app, logs).open();
+	}
+
+	openFeedbackReport(): void {
+		if (this.sessionAbort || this.phraseAbort || this.feedbackAbort) {
+			new Notice("Terminá el dictado actual antes de reportar un problema.");
+			return;
+		}
+		this.feedbackModal?.close();
+		const modal = new FeedbackModal(this.app, {
+			version: this.manifest?.version ?? "0.0.0",
+			context: this.lastFeedbackContext,
+			diagnose: async (report, signal) => {
+				const ready = await this.localManager.ready();
+				if (!ready.llm) {
+					throw new Error("El servidor local no está disponible.");
+				}
+				const provider = new LocalProvider({
+					transcriptionBaseUrl: `http://127.0.0.1:${this.settings.sttPort}`,
+					conversionBaseUrl: `http://127.0.0.1:${this.settings.llmPort}/v1`,
+					transcriptionModel: "whisper-small",
+					conversionModel: "qwen3.5-9b",
+					apiKey: this.settings.localLlmApiKey,
+				});
+				return diagnoseFeedback(provider, report, signal);
+			},
+			dictate: async (signal) => {
+				if (this.sessionAbort || this.phraseAbort) {
+					throw new Error("Terminá el dictado actual antes de dictar el reporte.");
+				}
+				const ready = await this.localManager.ready();
+				if (!ready.stt) {
+					throw new Error("El servidor local no está disponible.");
+				}
+				const recorder = new AudioRecorder();
+				try {
+					const blob = await recorder.capturePhrase({
+						signal,
+						silenceMs: this.settings.silenceMs,
+						graceMs: this.settings.graceMs,
+					});
+					if (!blob || blob.size < 800) {
+						throw new Error("No detecté voz.");
+					}
+					const provider = new LocalProvider({
+						transcriptionBaseUrl: `http://127.0.0.1:${this.settings.sttPort}`,
+						conversionBaseUrl: `http://127.0.0.1:${this.settings.llmPort}/v1`,
+						transcriptionModel: "whisper-small",
+						conversionModel: "qwen3.5-9b",
+						apiKey: this.settings.localLlmApiKey,
+					});
+					const result = await provider.transcribe(
+						blob,
+						`phrase.${blob.type.includes("webm") ? "webm" : "m4a"}`,
+						{ language: "es", contextPrompt: this.settings.transcriptionContext, signal },
+					);
+					return result.text.trim();
+				} finally {
+					recorder.dispose();
+				}
+			},
+			save: async (report) => {
+				const folder = "Vibe LaTeX Feedback";
+				if (!(await this.app.vault.adapter.exists(folder))) {
+					await this.app.vault.createFolder(folder);
+				}
+				const path = `${folder}/${report.id}.json`;
+				await this.app.vault.create(path, serializeFeedback(report));
+				return path;
+			},
+		});
+		const originalOnClose = modal.onClose.bind(modal);
+		modal.onClose = () => {
+			originalOnClose();
+			this.feedbackModal = undefined;
+		};
+		this.feedbackModal = modal;
+		modal.open();
+	}
+
+	async reportProblemByVoice(): Promise<void> {
+		if (this.feedbackModal) {
+			new Notice("Cerrá el reporte de feedback antes de reportar un problema.");
+			return;
+		}
+		if (this.feedbackAbort) {
+			this.feedbackAbort.abort();
+			return;
+		}
+		if (this.sessionAbort || this.phraseAbort) {
+			new Notice("Terminá el dictado actual antes de reportar un problema.");
+			return;
+		}
+		const context = this.lastFeedbackContext ? { ...this.lastFeedbackContext } : undefined;
+
+		const recorder = new AudioRecorder();
+		const feedbackAbort = new AbortController();
+		this.feedbackAbort = feedbackAbort;
+		const signal = feedbackAbort.signal;
+		const captureAbort = new AbortController();
+		const timeout = setTimeout(() => captureAbort.abort(), 30_000);
+
+		this.updateStatus("escuchando reporte...");
+		new Notice("Vibe LaTeX: escuchando el reporte. Silencio para terminar.");
+
+		try {
+			const ready = await this.localManager.ready();
+			if (signal.aborted) return;
+			if (!ready.stt) {
+				new Notice("Vibe LaTeX: el servidor de voz no responde.");
+				return;
+			}
+			const blob = await recorder.capturePhrase({
+				signal: anySignal([feedbackAbort.signal, captureAbort.signal]),
+				silenceMs: this.settings.silenceMs,
+				graceMs: this.settings.graceMs,
+			});
+			clearTimeout(timeout);
+			if (signal.aborted) return;
+			if (!blob || blob.size < 800) {
+				new Notice("Vibe LaTeX: no escuché ninguna descripción.");
+				return;
+			}
+
+			this.updateStatus("transcribiendo...");
+			const provider = new LocalProvider({
+				transcriptionBaseUrl: `http://127.0.0.1:${this.settings.sttPort}`,
+				conversionBaseUrl: `http://127.0.0.1:${this.settings.llmPort}/v1`,
+				transcriptionModel: "whisper-small",
+				conversionModel: "qwen3.5-9b",
+				apiKey: this.settings.localLlmApiKey,
+			});
+			const result = await provider.transcribe(
+				blob,
+				`phrase.${blob.type.includes("webm") ? "webm" : "m4a"}`,
+				{ language: "es", contextPrompt: this.settings.transcriptionContext, signal },
+			);
+			if (signal.aborted) return;
+			const description = (result.text ?? "").trim();
+			if (!description) {
+				new Notice("Vibe LaTeX: no entendí el reporte.");
+				return;
+			}
+
+			const report = createFeedbackReport(
+				description,
+				this.manifest?.version ?? "0.0.0",
+				context,
+				this.settings.feedbackIncludeContext === true,
+			);
+
+			const folder = "Vibe LaTeX Feedback";
+			if (!(await this.app.vault.adapter.exists(folder))) {
+				if (signal.aborted) return;
+				await this.app.vault.createFolder(folder);
+			}
+			if (signal.aborted) return;
+			const path = `${folder}/${report.id}.json`;
+			const createdFile = await this.app.vault.create(path, serializeFeedback(report));
+			if (signal.aborted) return;
+
+			const ready2 = await this.localManager.ready();
+			if (signal.aborted) return;
+			if (ready2.llm) {
+				this.updateStatus("diagnosticando...");
+				try {
+					await diagnoseFeedback(provider, report, signal);
+					if (signal.aborted) return;
+					await this.app.vault.modify(createdFile, serializeFeedback(report));
+					new Notice(`Vibe LaTeX: Reporte guardado en ${folder}. No se envió automáticamente.`);
+				} catch (e) {
+					new Notice("Vibe LaTeX: Reporte guardado sin diagnóstico. Revisá que Qwen local esté disponible.");
+				}
+			} else {
+				new Notice("Vibe LaTeX: Reporte guardado sin diagnóstico. Revisá que Qwen local esté disponible.");
+			}
+		} catch (e) {
+			new Notice("Vibe LaTeX: no se pudo completar el reporte.");
+		} finally {
+			recorder.dispose();
+			clearTimeout(timeout);
+			if (this.feedbackAbort === feedbackAbort) {
+				this.feedbackAbort = null;
+			}
+			this.updateStatus("");
+		}
 	}
 
 	private async openLogsFolder(): Promise<void> {
@@ -292,6 +495,14 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private async correctByVoice(editor: Editor): Promise<void> {
+		if (this.feedbackModal) {
+			new Notice("Cerrá el reporte de feedback antes de corregir.");
+			return;
+		}
+		if (this.feedbackAbort) {
+			new Notice("Terminá el reporte de feedback antes de corregir.");
+			return;
+		}
 		if (this.sessionAbort) {
 			this.sessionAbort.abort();
 			const deadline = Date.now() + 4_000;
@@ -462,7 +673,9 @@ export default class LatexVoicePlugin extends Plugin {
 
 	async onunload() {
 		this.sessionAbort?.abort();
+		this.feedbackAbort?.abort();
 		this.recorder.dispose();
+		this.feedbackModal?.close();
 		await this.localManager?.stop().catch(() => undefined);
 	}
 
@@ -483,10 +696,18 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private updateStatus(text: string) {
-		this.statusBarEl.setText(text ? `Vibe LaTeX: ${text}` : "");
+		this.statusBarEl?.setText(text ? `Vibe LaTeX: ${text}` : "");
 	}
 
 	private async toggleDictation() {
+		if (this.feedbackModal) {
+			new Notice("Cerrá el reporte de feedback antes de dictar.");
+			return;
+		}
+		if (this.feedbackAbort) {
+			new Notice("Terminá el reporte de feedback antes de dictar.");
+			return;
+		}
 		if (this.settings.devMode && this.settings.testAudioPath) {
 			await this.dictateFromFile(this.settings.testAudioPath);
 			return;
@@ -507,6 +728,14 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private correctLastDictation() {
+		if (this.feedbackModal) {
+			new Notice("Cerrá el reporte de feedback antes de corregir.");
+			return;
+		}
+		if (this.feedbackAbort) {
+			new Notice("Terminá el reporte de feedback antes de corregir.");
+			return;
+		}
 		if (this.sessionAbort) {
 			new Notice("Terminá el dictado actual antes de corregir.");
 			return;
@@ -616,7 +845,7 @@ export default class LatexVoicePlugin extends Plugin {
 
 				this.updateStatus("procesando...");
 				try {
-					const { output, usage, replacesContext } = await dictatePipeline(
+					const { transcript, output, usage, replacesContext } = await dictatePipeline(
 						provider,
 						blob,
 						`phrase.${blob.type.includes("webm") ? "webm" : "m4a"}`,
@@ -629,6 +858,7 @@ export default class LatexVoicePlugin extends Plugin {
 								this.updateStatus(step === "transcribing" ? "transcribiendo..." : "convirtiendo..."),
 						},
 					);
+					this.lastFeedbackContext = { transcript, output };
 					await this.recordUsage(usage);
 					await this.guard.waitUntilIdle(signal);
 					const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -717,12 +947,20 @@ export default class LatexVoicePlugin extends Plugin {
 						await this.saveAudioFile(blob);
 					}
 				} catch (e) {
+					if (!this.lastFeedbackContext) {
+						this.lastFeedbackContext = { transcript: "", output: "" };
+					}
+					this.lastFeedbackContext.error = "Error durante el dictado";
 					new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
 				}
 				if (replaceTarget) break;
 				if (!signal.aborted) this.updateStatus("escuchando...");
 			}
 		} catch (e) {
+			if (!this.lastFeedbackContext) {
+				this.lastFeedbackContext = { transcript: "", output: "" };
+			}
+			this.lastFeedbackContext.error = "Error durante el dictado";
 			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
 		} finally {
 			this.sessionAbort = null;
@@ -1158,6 +1396,7 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 		this.renderPromptGroup(content);
 		this.renderImproveGroup(content);
 		this.renderRecordingGroup(content);
+		this.renderFeedbackGroup(content);
 		this.renderUsageGroup(content);
 	}
 
@@ -1510,6 +1749,21 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 			});
+	}
+
+	private renderFeedbackGroup(container: HTMLElement): void {
+		this.subHeader(container, "Reportes de errores");
+		const s = this.plugin.settings;
+
+		new Setting(container)
+			.setName("Incluir contexto en reportes de errores")
+			.setDesc("Última entrada/salida, solo en archivos locales; pueden sincronizarse con tu bóveda.")
+			.addToggle((t) =>
+				t.setValue(s.feedbackIncludeContext === true).onChange(async (v) => {
+					s.feedbackIncludeContext = v;
+					await this.plugin.saveSettings();
+				}),
+			);
 	}
 
 	private renderUsageGroup(container: HTMLElement): void {

@@ -4,6 +4,16 @@ Todos los cambios relevantes de Vibe LaTeX se documentan acá. El formato sigue
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el versionado es
 [SemVer](https://semver.org/lang/es/).
 
+## [0.6.2] - 2026-11-16
+
+### Added
+- Comando principal **Reportar un problema (feedback local)**: captura por voz sin ventana, atajo propio (sin atajo por defecto), el silencio cierra la captura, repetir el comando cancela, hasta 30 segundos, requiere Whisper y Qwen locales en ejecución, guarda automáticamente `Vibe LaTeX Feedback/<UUID>.json` antes del diagnóstico.
+- Casilla **Incluir contexto en reportes de errores** desactivada por defecto; se activa una vez para incluir la última entrada/salida.
+- No se capturan automáticamente audio, ajustes ni secretos; los archivos guardados son locales y pueden sincronizarse con la bóveda.
+- Sin entrega automática a la conversación ni entrenamiento/edición de código.
+- Comando opcional manual **Preparar reporte de feedback manualmente** para revisar/copiar el JSON.
+- El atajo `Cmd/Ctrl+Shift+R` se mantiene para **Corregir la última frase dictada**.
+
 ## [0.6.1] - 2026-11-16
 
 ### Changed

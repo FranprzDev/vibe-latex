@@ -91,6 +91,17 @@ cuando activás **Guardar audio**.
 
 El audio se envía al servicio configurado para transcribirlo y el texto reconocido se envía al mismo servicio para convertirlo en Markdown y LaTeX. OpenAI se usa por defecto; la URL base permite configurar un endpoint compatible. Las grabaciones se descartan al terminar salvo que actives **Guardar audio**.
 
+## Reportar un problema (feedback local)
+
+El comando principal **Reportar un problema (feedback local)** no abre ninguna ventana: asignale tu propio atajo de Obsidian (no tiene atajo por defecto), hablá y el silencio cierra la captura; volver a ejecutar el comando cancela. La captura dura hasta 30 segundos. Requiere que los servidores locales (Whisper y Qwen) estén en ejecución. El reporte se guarda automáticamente en la carpeta `Vibe LaTeX Feedback` como `<UUID>.json` antes del diagnóstico. No se guardan grabaciones ni se adjuntan ajustes o claves. Los archivos guardados son locales y pueden sincronizarse con la bóveda. No hay entrega automática a la conversación ni entrenamiento/edición de código.
+
+- La casilla **Incluir contexto en reportes de errores** está desactivada por defecto (privacidad); activala una vez si querés incluir la última entrada/salida.
+- El audio del dictado de reportes nunca se guarda, aunque **Guardar audio** esté activado en el dictado normal.
+- El diagnóstico usa únicamente el servidor local (127.0.0.1) y no modifica código ni entrena modelos.
+- Si Whisper no está disponible, usá el comando manual para escribir, guardar y copiar el reporte. Si sólo falta Qwen, el reporte hablado se guarda sin diagnóstico.
+- Comando opcional manual **Preparar reporte de feedback manualmente** para revisar/copiar el JSON.
+- El atajo `Cmd/Ctrl+Shift+R` se mantiene para **Corregir la última frase dictada**.
+
 ## Desarrollo
 
 ```bash

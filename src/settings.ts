@@ -98,6 +98,8 @@ export interface LatexVoiceSettings {
 	lastSession?: LastDictation | null;
 	/** Remote provider config to restore when local mode is deactivated. */
 	previousRemoteSettings?: PreviousRemoteSettings | null;
+	/** Whether the last input/output context may be attached to error reports. */
+	feedbackIncludeContext: boolean;
 	/** E2E only. Requires devMode=true AND testAudioPath set — otherwise ignored. */
 	devMode?: boolean;
 	testAudioPath?: string;
@@ -133,6 +135,7 @@ export const DEFAULT_SETTINGS: LatexVoiceSettings = {
 	lastDictation: null,
 	lastSession: null,
 	previousRemoteSettings: null,
+	feedbackIncludeContext: false,
 };
 
 /**
@@ -244,6 +247,8 @@ export function migrateSettings(
 	settings.sttPort = clampDuration(settings.sttPort, DEFAULT_SETTINGS.sttPort, 1024, 65_535);
 	settings.llmPort = clampDuration(settings.llmPort, DEFAULT_SETTINGS.llmPort, 1024, 65_535);
 	if (settings.vlModel !== "450m" && settings.vlModel !== "1.6b") settings.vlModel = "450m";
+	if (typeof settings.feedbackIncludeContext !== "boolean")
+		settings.feedbackIncludeContext = DEFAULT_SETTINGS.feedbackIncludeContext;
 
 	return settings;
 }

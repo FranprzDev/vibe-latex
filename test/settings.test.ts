@@ -203,3 +203,20 @@ describe("0.5.10 migrations", () => {
 		void DEFAULT_SETTINGS;
 	});
 });
+
+describe("feedbackIncludeContext", () => {
+	it("defaults to false", () => {
+		expect(DEFAULT_SETTINGS.feedbackIncludeContext).toBe(false);
+		expect(migrateSettings(null).feedbackIncludeContext).toBe(false);
+	});
+
+	it("resets invalid values to false", () => {
+		expect(migrateSettings({ feedbackIncludeContext: "yes" }).feedbackIncludeContext).toBe(false);
+		expect(migrateSettings({ feedbackIncludeContext: 1 }).feedbackIncludeContext).toBe(false);
+	});
+
+	it("retains true", () => {
+		expect(migrateSettings({ feedbackIncludeContext: true }).feedbackIncludeContext).toBe(true);
+		expect(migrateSettings({ feedbackIncludeContext: false }).feedbackIncludeContext).toBe(false);
+	});
+});
