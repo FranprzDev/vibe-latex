@@ -9,6 +9,7 @@ import { formatCommandOnly, stripLeadingEllipsis, cleanText } from "./text-clean
 export interface PipelineResult {
 	transcript: string;
 	output: string;
+	replacesContext?: boolean;
 	usage: {
 		audioSeconds?: number;
 		inputTokens?: number;
@@ -18,6 +19,13 @@ export interface PipelineResult {
 
 const MATH_OR_FORMAT =
 	/\b(\d|integral|listas?|listado|enumerad[ao]|numerad[ao]|ordenad[ao]|desordenad[ao]|primero|segundo|tercero|derivada|límite|limite|sumatoria|productoria|raíz|raiz|fracción|fraccion|exponente|logaritmo|seno|coseno|tangente|matriz|matrices|determinante|ecuación|ecuacion|polinomio|transformada|laplace|fourier|nyquist|bode|routh|hurwitz|transferencia|polo|polos|ceros?|sigma|delta|theta|omega|lambda|infinito|tiende a|subíndice|subindice|al cuadrado|al cubo|elevado|inversa|numerador|denominador|título|titulo|subtítulo|subtitulo|lista|negrita|cursiva|código|codigo|cita|gráfico|grafico)\b|\/\//i;
+
+export function isContextualFormatCommand(text: string): boolean {
+	const hasConversionVerb = /(convert[ií]|conviert[ae]s?|pon[eé]|hac[eé])/i.test(text);
+	const hasReference = /(estos?|esos?|lo anterior|lo ultimo|lo último|la seleccion|la selección|el texto)/i.test(text);
+	const hasListIntent = /(lista|listado|enumerad|numerad|viñeta|bullet)/i.test(text);
+	return hasConversionVerb && hasReference && hasListIntent;
+}
 
 export function needsConversion(text: string): boolean {
 	return MATH_OR_FORMAT.test(text) || /\buno\b[\s\S]+\bdos\b/i.test(text);
@@ -33,6 +41,7 @@ export interface PipelineOptions {
 	onStep?: (step: "transcribing" | "converting") => void;
 	onTranscript?: (transcript: string) => void;
 	onToken?: (accumulated: string) => void;
+	editContext?: string;
 }
 
 
@@ -98,6 +107,22 @@ export async function dictatePipeline(
 		throw new Error("empty transcript");
 	}
 	const transcript = stripLeadingEllipsis(cleanedTranscript.trim());
+	if (isContextualFormatCommand(transcript)) {
+		if (!opts.editContext?.trim()) {
+			throw new Error("Seleccioná el texto o dictá los valores antes de pedir un listado.");
+		}
+		opts.onTranscript?.(transcript);
+		const edited = await applyVoiceEdit(provider, opts.editContext, transcript);
+		if (edited === null) {
+			throw new Error("No se pudo aplicar la edición de contexto.");
+		}
+		return {
+			transcript,
+			output: edited,
+			replacesContext: true,
+			usage: { audioSeconds: t.durationSeconds ?? opts.audioSeconds },
+		};
+	}
 	const marker = formatCommandOnly(transcript);
 	if (marker !== null) {
 		opts.onTranscript?.(transcript);

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { applyVoiceEdit, buildEditUserText, cleanVisionLatex, dictatePipeline } from "../src/pipeline";
+import { applyVoiceEdit, buildEditUserText, cleanVisionLatex, dictatePipeline, isContextualFormatCommand } from "../src/pipeline";
 import { VoiceProvider } from "../src/providers";
 import { DEFAULT_SETTINGS } from "../src/settings";
 
@@ -397,5 +397,73 @@ describe("applyVoiceEdit", () => {
 describe("buildEditUserText", () => {
 	it("joins passage and instruction with markers", () => {
 		expect(buildEditUserText("a", "b")).toBe("PASAJE:\na\n\nINSTRUCCIÓN:\nb");
+	});
+});
+
+describe("contextual format commands", () => {
+	it("detects contextual format commands", () => {
+		expect(isContextualFormatCommand("convierte esto en lista")).toBe(true);
+		expect(isContextualFormatCommand("poné estos valores como listado")).toBe(true);
+		expect(isContextualFormatCommand("hacé eso enumerado")).toBe(true);
+		expect(isContextualFormatCommand("quiero que esos valores los conviertas en un listado")).toBe(true);
+		expect(isContextualFormatCommand("convertí lo anterior en viñetas")).toBe(true);
+	});
+
+	it("rejects normal prose as contextual commands", () => {
+		expect(isContextualFormatCommand("esta noche tengo que estudiar para el parcial")).toBe(false);
+		expect(isContextualFormatCommand("el criterio de estabilidad del sistema")).toBe(false);
+		expect(isContextualFormatCommand("listado")).toBe(false);
+		expect(isContextualFormatCommand("convierte el texto")).toBe(false);
+	});
+
+	it("passes context to applyVoiceEdit as PASAJE and INSTRUCCION", async () => {
+		let seen = "";
+		const provider: VoiceProvider = {
+			...fakeProvider,
+			async transcribe() {
+				return { text: "convierte esto en lista", durationSeconds: 1 };
+			},
+			async convertToLatex(text: string) {
+				seen = text;
+				return { text: "1) uno\n2) dos" };
+			},
+		};
+		const res = await dictatePipeline(provider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS, {
+			editContext: "uno dos",
+		});
+		expect(res.transcript).toBe("convierte esto en lista");
+		expect(res.output).toBe("1) uno\n2) dos");
+		expect(res.replacesContext).toBe(true);
+		expect(res.usage).toEqual({ audioSeconds: 1 });
+		expect(seen).toContain("PASAJE:\nuno dos");
+		expect(seen).toContain("INSTRUCCIÓN:\nconvierte esto en lista");
+	});
+
+	it("rejects contextual commands without context or edit result", async () => {
+		const convert = vi.fn(async () => ({ text: "No se ha dictado ninguna expresión matemática." }));
+		const noContextProvider: VoiceProvider = {
+			...fakeProvider,
+			async transcribe() {
+				return { text: "convierte esto en lista", durationSeconds: 1 };
+			},
+			convertToLatex: convert,
+		};
+		await expect(
+			dictatePipeline(noContextProvider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS),
+		).rejects.toThrow("Seleccioná el texto o dictá los valores antes de pedir un listado.");
+		expect(convert).not.toHaveBeenCalled();
+
+		const nullProvider: VoiceProvider = {
+			...fakeProvider,
+			async transcribe() {
+				return { text: "convierte esto en lista", durationSeconds: 1 };
+			},
+			async convertToLatex() {
+				return { text: "No se ha dictado ninguna expresión matemática." };
+			},
+		};
+		await expect(
+			dictatePipeline(nullProvider, new Blob(["a"]), "d.m4a", DEFAULT_SETTINGS, { editContext: "uno dos" }),
+		).rejects.toThrow();
 	});
 });

@@ -176,6 +176,7 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private async convertSelectionToLatex(editor: Editor): Promise<void> {
+		const activeFilePath = this.app.workspace.getActiveFile()?.path;
 		const from = editor.posToOffset(editor.getCursor("from"));
 		const to = editor.posToOffset(editor.getCursor("to"));
 		const selection = editor.getSelection();
@@ -188,7 +189,13 @@ export default class LatexVoicePlugin extends Plugin {
 		try {
 			const output = await convertPlainText(createProvider(this.settings), selection, this.settings);
 			await this.guard.waitUntilIdle();
-			if (editor.getValue() !== snapshot || editor.getValue().slice(from, to) !== selection) {
+			const currentFile = this.app.workspace.getActiveFile();
+			if (
+				editor.getValue() !== snapshot ||
+				editor.getValue().slice(from, to) !== selection ||
+				!currentFile ||
+				currentFile.path !== activeFilePath
+			) {
 				new Notice("Vibe LaTeX: la selección cambió; no la reemplacé.");
 				return;
 			}
@@ -219,6 +226,9 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private async pasteClipboardAsLatex(editor: Editor): Promise<void> {
+		const startFile = this.app.workspace.getActiveFile();
+		const startFilePath = startFile?.path;
+		const startEditor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
 		const imageBase64 = await this.readClipboardImage();
 		if (imageBase64) {
 			if (!this.settings.improveEnabled) {
@@ -234,6 +244,16 @@ export default class LatexVoicePlugin extends Plugin {
 				return;
 			}
 			await this.guard.waitUntilIdle();
+			const currentFile = this.app.workspace.getActiveFile();
+			const currentEditor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+			if (
+				!currentFile ||
+				currentFile.path !== startFilePath ||
+				(startEditor !== undefined && currentEditor !== startEditor)
+			) {
+				new Notice("Vibe LaTeX: cambiaste de nota; no pegué el contenido.");
+				return;
+			}
 			const cursor = editor.getCursor();
 			editor.replaceRange(latex, cursor, cursor);
 			return;
@@ -254,6 +274,16 @@ export default class LatexVoicePlugin extends Plugin {
 		try {
 			const output = await convertPlainText(createProvider(this.settings), cleaned, this.settings);
 			await this.guard.waitUntilIdle();
+			const currentFile = this.app.workspace.getActiveFile();
+			const currentEditor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+			if (
+				!currentFile ||
+				currentFile.path !== startFilePath ||
+				(startEditor !== undefined && currentEditor !== startEditor)
+			) {
+				new Notice("Vibe LaTeX: cambiaste de nota; no pegué el contenido.");
+				return;
+			}
 			const cursor = editor.getCursor();
 			editor.replaceRange(output, cursor, cursor);
 		} catch (e) {
@@ -374,6 +404,9 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private async pasteImageAsLatexLocal(editor: Editor): Promise<void> {
+		const startFile = this.app.workspace.getActiveFile();
+		const startFilePath = startFile?.path;
+		const startEditor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
 		if (this.settings.providerId !== "local") {
 			new Notice("Vibe LaTeX: la conversión local de imágenes necesita el modo local activado.");
 			return;
@@ -408,6 +441,16 @@ export default class LatexVoicePlugin extends Plugin {
 				return;
 			}
 			await this.guard.waitUntilIdle();
+			const currentFile = this.app.workspace.getActiveFile();
+			const currentEditor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+			if (
+				!currentFile ||
+				currentFile.path !== startFilePath ||
+				(startEditor !== undefined && currentEditor !== startEditor)
+			) {
+				new Notice("Vibe LaTeX: cambiaste de nota; no pegué el contenido.");
+				return;
+			}
 			const cursor = editor.getCursor();
 			editor.replaceRange(latex, cursor, cursor);
 		} catch (e) {
@@ -486,6 +529,7 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private async runSession(replaceTarget?: LastDictation) {
+		const activeFilePath = this.app.workspace.getActiveFile()?.path;
 		this.sessionRange = null;
 		this.sessionAbort = new AbortController();
 		const signal = this.sessionAbort.signal;
@@ -510,6 +554,57 @@ export default class LatexVoicePlugin extends Plugin {
 
 		try {
 			while (!signal.aborted) {
+				const viewSnapshot = this.app.workspace.getActiveViewOfType(MarkdownView);
+				const fileSnapshot = this.app.workspace.getActiveFile();
+				const contentSnapshot = viewSnapshot?.editor.getValue() ?? "";
+				const selectionSnapshot = viewSnapshot?.editor.getSelection() ?? "";
+				const selectionFromSnapshot = viewSnapshot
+					? viewSnapshot.editor.posToOffset(viewSnapshot.editor.getCursor("from"))
+					: 0;
+				const selectionToSnapshot = viewSnapshot
+					? viewSnapshot.editor.posToOffset(viewSnapshot.editor.getCursor("to"))
+					: 0;
+				let contextTarget: LastDictation | null = null;
+				if (selectionSnapshot.trim()) {
+					if (fileSnapshot) {
+						contextTarget = {
+							filePath: fileSnapshot.path,
+							from: selectionFromSnapshot,
+							to: selectionToSnapshot,
+							text: selectionSnapshot,
+						};
+					}
+				} else if (fileSnapshot) {
+					const session = this.settings.lastSession ?? null;
+					if (
+						session &&
+						session.text &&
+						session.filePath === fileSnapshot.path &&
+						verifiedDictationRange(contentSnapshot, session)
+					) {
+						contextTarget = {
+							filePath: session.filePath,
+							from: session.from,
+							to: session.to,
+							text: session.text,
+						};
+					} else {
+						const last = this.settings.lastDictation ?? null;
+						if (
+							last &&
+							last.filePath === fileSnapshot.path &&
+							verifiedDictationRange(contentSnapshot, last)
+						) {
+							contextTarget = {
+								filePath: last.filePath,
+								from: last.from,
+								to: last.to,
+								text: last.text,
+							};
+						}
+					}
+				}
+
 				this.phraseAbort = new AbortController();
 				const blob = await this.recorder.capturePhrase({
 					signal: anySignal([signal, this.phraseAbort.signal]),
@@ -521,7 +616,7 @@ export default class LatexVoicePlugin extends Plugin {
 
 				this.updateStatus("procesando...");
 				try {
-					const { output, usage } = await dictatePipeline(
+					const { output, usage, replacesContext } = await dictatePipeline(
 						provider,
 						blob,
 						`phrase.${blob.type.includes("webm") ? "webm" : "m4a"}`,
@@ -529,6 +624,7 @@ export default class LatexVoicePlugin extends Plugin {
 						{
 							audioSeconds: this.recorder.lastDurationSeconds,
 							signal,
+							editContext: !replaceTarget ? contextTarget?.text : undefined,
 							onStep: (step) =>
 								this.updateStatus(step === "transcribing" ? "transcribiendo..." : "convirtiendo..."),
 						},
@@ -537,18 +633,48 @@ export default class LatexVoicePlugin extends Plugin {
 					await this.guard.waitUntilIdle(signal);
 					const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 					const file = this.app.workspace.getActiveFile();
+					if (!file || file.path !== activeFilePath) {
+						new Notice("Vibe LaTeX: cambiaste de nota; no inserté el texto.");
+						break;
+					}
 					if (replaceTarget && (!view || !file)) {
 						new Notice("Abrí la nota de la última frase para poder corregirla.");
 						break;
 					}
 					if (view && file) {
 						const editor = view.editor;
-						const text = dictationReplacementText(
-							output,
-							editor.getSelection(),
-							replaceTarget?.text,
-						);
-						if (replaceTarget) {
+						if (replacesContext) {
+							if (
+								!contextTarget ||
+								editor.getValue() !== contentSnapshot ||
+								file.path !== contextTarget.filePath ||
+								!verifiedDictationRange(editor.getValue(), contextTarget)
+							) {
+								new Notice("Vibe LaTeX: no se reemplazó el pasaje.");
+								break;
+							}
+							const range = verifiedDictationRange(editor.getValue(), contextTarget)!;
+							const text = dictationReplacementText(output, "", contextTarget.text);
+							const from = editor.offsetToPos(range.from);
+							const to = editor.offsetToPos(range.to);
+							editor.replaceRange(text, from, to);
+							const updated = {
+								filePath: file.path,
+								from: range.from,
+								to: range.from + text.length,
+								text,
+							};
+							this.setLastDictation(updated);
+							this.sessionRange = extendDictationRange(
+								this.sessionRange, file.path, range.from, range.from + text.length,
+							);
+							editor.setCursor(editor.offsetToPos(range.from + text.length));
+						} else if (replaceTarget) {
+							const text = dictationReplacementText(
+								output,
+								editor.getSelection(),
+								replaceTarget.text,
+							);
 							const range = verifiedDictationRange(editor.getValue(), replaceTarget);
 							if (file.path !== replaceTarget.filePath || !range) {
 								new Notice("La frase cambió durante la corrección; no la reemplacé.");
@@ -568,6 +694,10 @@ export default class LatexVoicePlugin extends Plugin {
 							);
 							editor.setCursor(editor.offsetToPos(range.from + text.length));
 						} else {
+							const text = dictationReplacementText(
+								output,
+								editor.getSelection(),
+							);
 							const cursor = editor.getCursor("to");
 							const start = editor.posToOffset(cursor);
 							editor.replaceRange(text, cursor, cursor);
@@ -619,6 +749,7 @@ export default class LatexVoicePlugin extends Plugin {
 
 	private async dictateFromFile(path: string) {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const file = this.app.workspace.getActiveFile();
 		if (!view) {
 			new Notice("Vibe LaTeX: abrí una nota antes de dictar.");
 			return;
@@ -630,7 +761,19 @@ export default class LatexVoicePlugin extends Plugin {
 			const provider = createProvider(this.settings);
 			const { output, usage } = await dictatePipeline(provider, audio, path, this.settings);
 			await this.recordUsage(usage);
-			view.editor.replaceSelection(output);
+			await this.guard.waitUntilIdle();
+			const currentView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			const currentFile = this.app.workspace.getActiveFile();
+			if (
+				!currentView ||
+				currentView !== view ||
+				currentFile?.path !== file?.path
+			) {
+				new Notice("Vibe LaTeX: cambiaste de nota; no inserté el texto.");
+				return;
+			}
+			const cursor = view.editor.getCursor("to");
+			view.editor.replaceRange(output, cursor, cursor);
 			new Notice("Vibe LaTeX: listo (audio de prueba).");
 		} catch (e) {
 			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
@@ -693,22 +836,9 @@ class LatexVoiceSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-		this.renderStreamingToggle(containerEl);
 		this.localSection = containerEl.createDiv();
 		this.advancedSection = containerEl.createDiv();
 		void this.renderAll();
-	}
-
-	private renderStreamingToggle(container: HTMLElement): void {
-		new Setting(container)
-			.setName("Inserción progresiva")
-			.setDesc("Inserta el texto transcrito al instante y lo reemplaza con el LaTeX convertido. Si falla, desactivala acá.")
-			.addToggle((t) =>
-				t.setValue(this.plugin.settings.streamingInsert).onChange(async (v) => {
-					this.plugin.settings.streamingInsert = v;
-					await this.plugin.saveSettings();
-				})
-			);
 	}
 
 	private async renderAll(): Promise<void> {
