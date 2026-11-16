@@ -4,6 +4,15 @@ Todos los cambios relevantes de Vibe LaTeX se documentan acá. El formato sigue
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el versionado es
 [SemVer](https://semver.org/lang/es/).
 
+## [0.6.1] - 2026-11-16
+
+### Changed
+- Settings UI removes the streaming insertion toggle (setting retained for backward compatibility); buffering ensures a safe final phrase.
+- Keyboard priority jitter and buffering.
+- Safe note revalidation.
+- Sound labels filtering.
+- Lists/contextual commands.
+
 ## [0.4.1] - 2026-11-12
 
 ### Agregado

@@ -1,6 +1,6 @@
 import { VoiceProvider } from "./providers";
 import { LatexVoiceSettings } from "./settings";
-import { formatCommandOnly, stripLeadingEllipsis } from "./text-clean";
+import { formatCommandOnly, stripLeadingEllipsis, cleanText } from "./text-clean";
 
 /**
  * Core dictation pipeline, decoupled from Obsidian so it can be tested
@@ -9,6 +9,7 @@ import { formatCommandOnly, stripLeadingEllipsis } from "./text-clean";
 export interface PipelineResult {
 	transcript: string;
 	output: string;
+	replacesContext?: boolean;
 	usage: {
 		audioSeconds?: number;
 		inputTokens?: number;
@@ -17,10 +18,17 @@ export interface PipelineResult {
 }
 
 const MATH_OR_FORMAT =
-	/\b(\d|integral|derivada|límite|limite|sumatoria|productoria|raíz|raiz|fracción|fraccion|exponente|logaritmo|seno|coseno|tangente|matriz|matrices|determinante|ecuación|ecuacion|polinomio|transformada|laplace|fourier|nyquist|bode|routh|hurwitz|transferencia|polo|polos|ceros?|sigma|delta|theta|omega|lambda|infinito|tiende a|subíndice|subindice|al cuadrado|al cubo|elevado|inversa|numerador|denominador|título|titulo|subtítulo|subtitulo|lista|negrita|cursiva|código|codigo|cita|gráfico|grafico)\b|\/\//i;
+	/\b(\d|integral|listas?|listado|enumerad[ao]|numerad[ao]|ordenad[ao]|desordenad[ao]|primero|segundo|tercero|derivada|límite|limite|sumatoria|productoria|raíz|raiz|fracción|fraccion|exponente|logaritmo|seno|coseno|tangente|matriz|matrices|determinante|ecuación|ecuacion|polinomio|transformada|laplace|fourier|nyquist|bode|routh|hurwitz|transferencia|polo|polos|ceros?|sigma|delta|theta|omega|lambda|infinito|tiende a|subíndice|subindice|al cuadrado|al cubo|elevado|inversa|numerador|denominador|título|titulo|subtítulo|subtitulo|lista|negrita|cursiva|código|codigo|cita|gráfico|grafico)\b|\/\//i;
+
+export function isContextualFormatCommand(text: string): boolean {
+	const hasConversionVerb = /(convert[ií]|conviert[ae]s?|pon[eé]|hac[eé])/i.test(text);
+	const hasReference = /(estos?|esos?|lo anterior|lo ultimo|lo último|la seleccion|la selección|el texto)/i.test(text);
+	const hasListIntent = /(lista|listado|enumerad|numerad|viñeta|bullet)/i.test(text);
+	return hasConversionVerb && hasReference && hasListIntent;
+}
 
 export function needsConversion(text: string): boolean {
-	return MATH_OR_FORMAT.test(text);
+	return MATH_OR_FORMAT.test(text) || /\buno\b[\s\S]+\bdos\b/i.test(text);
 }
 
 export function conversionMaxTokens(text: string): number {
@@ -33,6 +41,7 @@ export interface PipelineOptions {
 	onStep?: (step: "transcribing" | "converting") => void;
 	onTranscript?: (transcript: string) => void;
 	onToken?: (accumulated: string) => void;
+	editContext?: string;
 }
 
 
@@ -93,10 +102,27 @@ export async function dictatePipeline(
 		contextPrompt: settings.transcriptionContext,
 		signal: opts.signal,
 	});
-	if (isBlankTranscript(t.text)) {
+	const cleanedTranscript = cleanText(t.text);
+	if (isBlankTranscript(cleanedTranscript)) {
 		throw new Error("empty transcript");
 	}
-	const transcript = stripLeadingEllipsis(t.text.trim());
+	const transcript = stripLeadingEllipsis(cleanedTranscript.trim());
+	if (isContextualFormatCommand(transcript)) {
+		if (!opts.editContext?.trim()) {
+			throw new Error("Seleccioná el texto o dictá los valores antes de pedir un listado.");
+		}
+		opts.onTranscript?.(transcript);
+		const edited = await applyVoiceEdit(provider, opts.editContext, transcript);
+		if (edited === null) {
+			throw new Error("No se pudo aplicar la edición de contexto.");
+		}
+		return {
+			transcript,
+			output: edited,
+			replacesContext: true,
+			usage: { audioSeconds: t.durationSeconds ?? opts.audioSeconds },
+		};
+	}
 	const marker = formatCommandOnly(transcript);
 	if (marker !== null) {
 		opts.onTranscript?.(transcript);
@@ -119,16 +145,16 @@ export async function dictatePipeline(
 		systemPrompt: settings.conversionPrompt,
 		signal: opts.signal,
 		maxTokens: conversionMaxTokens(transcript),
-		onToken: opts.onToken,
+		onToken: opts.onToken ? (text) => opts.onToken!(cleanText(text)) : undefined,
 	});
 	// "//" is the spoken paragraph-break marker.
-	const converted = c.text.replace(/\s*\/\/\s*/g, "\n\n").trim();
+	const converted = cleanText(c.text).replace(/\s*\/\/\s*/g, "\n\n").trim();
 	const output = applyOrderedListStyle(
 		!converted || looksLikeMetaResponse(converted) ? transcript : converted,
 	);
 	return {
 		transcript,
-		output: await maybeImprove(output, settings),
+		output: cleanText(await maybeImprove(output, settings)),
 		usage: {
 			audioSeconds: t.durationSeconds ?? opts.audioSeconds,
 			inputTokens: c.inputTokens,
@@ -145,11 +171,11 @@ export async function convertPlainText(
 	const c = await provider.convertToLatex(text.trim(), {
 		systemPrompt: settings.conversionPrompt,
 	});
-	const converted = c.text.replace(/\s*\/\/\s*/g, "\n\n").trim();
+	const converted = cleanText(c.text).replace(/\s*\/\/\s*/g, "\n\n").trim();
 	const output = applyOrderedListStyle(
 		!converted || looksLikeMetaResponse(converted) ? text.trim() : converted,
 	);
-	return maybeImprove(output, settings);
+	return cleanText(await maybeImprove(output, settings));
 }
 
 export const EDIT_SYSTEM_PROMPT = `Recibís un pasaje de notas de estudio en Markdown con LaTeX y una instrucción de corrección dictada por voz, en español.
@@ -175,11 +201,11 @@ export async function applyVoiceEdit(
 		systemPrompt: EDIT_SYSTEM_PROMPT,
 		maxTokens: Math.min(4096, Math.max(1024, Math.ceil(passage.length / 2) + 256)),
 	});
-	let out = c.text.trim();
+	let out = cleanText(c.text).trim();
 	const fence = out.match(/```(?:latex|tex|markdown|md)?\s*([\s\S]*?)```/i);
 	if (fence) out = fence[1].trim();
 	if (!out || looksLikeMetaResponse(out)) return null;
-	return out;
+	return cleanText(out);
 }
 
 export async function convertImageToLatex(
@@ -217,7 +243,7 @@ export function cleanVisionLatex(raw: string): string | null {
 	text = text.trim();
 	if (!text) return null;
 	if (looksLikeMetaResponse(text)) return null;
-	return text;
+	return cleanText(text);
 }
 
 export async function convertImageLocal(
