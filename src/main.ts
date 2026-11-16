@@ -19,7 +19,8 @@ import {
 import { AudioRecorder, audioExtension } from "./recorder";
 import { createProvider } from "./providers";
 import { applyVoiceEdit, convertImageLocal, convertImageToLatex, convertPlainText, dictatePipeline } from "./pipeline";
-import { cleanPdfText, trailingEllipsisLength } from "./text-clean";
+import { cleanPdfText } from "./text-clean";
+import { TypingGuard } from "./typing-guard";
 import { friendlyError } from "./errors";
 import { anySignal } from "./abort";
 import { INSTALL_STEPS, InstallProgress, LocalModeManager, LocalStatus, vlDownloadBytes, VlModelSize } from "./local/manager";
@@ -41,7 +42,7 @@ export default class LatexVoicePlugin extends Plugin {
 	private phraseAbort: AbortController | null = null;
 	private sessionRange: { filePath: string; from: number; to: number } | null = null;
 	private pendingSave: Promise<void> = Promise.resolve();
-
+	private guard = new TypingGuard();
 	async onload() {
 		await this.loadSettings();
 
@@ -79,7 +80,10 @@ export default class LatexVoicePlugin extends Plugin {
 
 		this.statusBarEl = this.addStatusBarItem();
 		this.updateStatus("");
-
+		this.registerDomEvent(document, "keydown", () => this.guard.markTyping());
+		this.registerDomEvent(document, "beforeinput", () => this.guard.markTyping());
+		this.registerDomEvent(document, "compositionstart", () => this.guard.setComposing(true));
+		this.registerDomEvent(document, "compositionend", () => this.guard.setComposing(false));
 		this.addRibbonIcon("mic", "Vibe LaTeX: dictar", () => {
 			void this.toggleDictation();
 		});
@@ -172,15 +176,23 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private async convertSelectionToLatex(editor: Editor): Promise<void> {
+		const from = editor.posToOffset(editor.getCursor("from"));
+		const to = editor.posToOffset(editor.getCursor("to"));
 		const selection = editor.getSelection();
 		if (!selection.trim()) {
 			new Notice("Vibe LaTeX: seleccioná el texto a convertir.");
 			return;
 		}
+		const snapshot = editor.getValue();
 		new Notice("Vibe LaTeX: convirtiendo la selección…");
 		try {
 			const output = await convertPlainText(createProvider(this.settings), selection, this.settings);
-			editor.replaceSelection(output);
+			await this.guard.waitUntilIdle();
+			if (editor.getValue() !== snapshot || editor.getValue().slice(from, to) !== selection) {
+				new Notice("Vibe LaTeX: la selección cambió; no la reemplacé.");
+				return;
+			}
+			editor.replaceRange(output, editor.offsetToPos(from), editor.offsetToPos(to));
 		} catch (e) {
 			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
 		}
@@ -221,7 +233,9 @@ export default class LatexVoicePlugin extends Plugin {
 				new Notice("Vibe LaTeX: no pude convertir la imagen.");
 				return;
 			}
-			editor.replaceSelection(latex);
+			await this.guard.waitUntilIdle();
+			const cursor = editor.getCursor();
+			editor.replaceRange(latex, cursor, cursor);
 			return;
 		}
 		let raw = "";
@@ -239,7 +253,9 @@ export default class LatexVoicePlugin extends Plugin {
 		new Notice("Vibe LaTeX: convirtiendo el portapapeles…");
 		try {
 			const output = await convertPlainText(createProvider(this.settings), cleaned, this.settings);
-			editor.replaceSelection(output);
+			await this.guard.waitUntilIdle();
+			const cursor = editor.getCursor();
+			editor.replaceRange(output, cursor, cursor);
 		} catch (e) {
 			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
 		}
@@ -260,6 +276,9 @@ export default class LatexVoicePlugin extends Plugin {
 		const file = this.app.workspace.getActiveFile();
 		const content = editor.getValue();
 		const selection = editor.getSelection();
+		const selectionFrom = editor.posToOffset(editor.getCursor("from"));
+		const selectionTo = editor.posToOffset(editor.getCursor("to"));
+		const snapshot = content;
 		let passage = "";
 		let range: { from: number; to: number } | null = null;
 		if (selection.trim()) {
@@ -322,6 +341,12 @@ export default class LatexVoicePlugin extends Plugin {
 			const finalText = passage.endsWith("\n") && !rewritten.endsWith("\n")
 				? `${rewritten}\n`
 				: rewritten;
+			await this.guard.waitUntilIdle();
+			const currentFile = this.app.workspace.getActiveFile();
+			if (editor.getValue() !== snapshot || (file && currentFile?.path !== file.path)) {
+				new Notice("Vibe LaTeX: el texto cambió durante la corrección; no la reemplacé.");
+				return;
+			}
 			if (range && file) {
 				editor.replaceRange(
 					finalText,
@@ -337,7 +362,7 @@ export default class LatexVoicePlugin extends Plugin {
 				this.settings.lastSession = updated;
 				this.setLastDictation(updated);
 			} else {
-				editor.replaceSelection(finalText);
+				editor.replaceRange(finalText, editor.offsetToPos(selectionFrom), editor.offsetToPos(selectionTo));
 			}
 			new Notice("Vibe LaTeX: corrección aplicada.");
 		} catch (e) {
@@ -382,7 +407,9 @@ export default class LatexVoicePlugin extends Plugin {
 				new Notice("Vibe LaTeX: no pude convertir la imagen.");
 				return;
 			}
-			editor.replaceSelection(latex);
+			await this.guard.waitUntilIdle();
+			const cursor = editor.getCursor();
+			editor.replaceRange(latex, cursor, cursor);
 		} catch (e) {
 			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
 		} finally {
@@ -493,8 +520,6 @@ export default class LatexVoicePlugin extends Plugin {
 				if (!blob || blob.size < 800) continue;
 
 				this.updateStatus("procesando...");
-				const useStreaming = this.settings.streamingInsert && !replaceTarget;
-				const streaming: { range: LastDictation | null } = { range: null };
 				try {
 					const { output, usage } = await dictatePipeline(
 						provider,
@@ -506,49 +531,10 @@ export default class LatexVoicePlugin extends Plugin {
 							signal,
 							onStep: (step) =>
 								this.updateStatus(step === "transcribing" ? "transcribiendo..." : "convirtiendo..."),
-							onTranscript: useStreaming
-								? (transcript) => {
-									const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-									const activeFile = this.app.workspace.getActiveFile();
-									if (!activeView || !activeFile) return;
-									const activeEditor = activeView.editor;
-									const cursor = activeEditor.getCursor();
-									const from = activeEditor.posToOffset(cursor);
-									activeEditor.replaceRange(transcript, cursor, cursor);
-									activeEditor.setCursor(activeEditor.offsetToPos(from + transcript.length));
-									streaming.range = {
-										filePath: activeFile.path,
-										from,
-										to: from + transcript.length,
-										text: transcript,
-									};
-								}
-								: undefined,
-							onToken: useStreaming
-								? (accumulated) => {
-									const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-									const activeFile = this.app.workspace.getActiveFile();
-									const r = streaming.range;
-									if (!activeView || !activeFile || !r || activeFile.path !== r.filePath) return;
-									const activeEditor = activeView.editor;
-									if (activeEditor.getValue().slice(r.from, r.to) !== r.text) return;
-									activeEditor.replaceRange(
-										accumulated,
-										activeEditor.offsetToPos(r.from),
-										activeEditor.offsetToPos(r.to),
-									);
-									streaming.range = {
-										filePath: r.filePath,
-										from: r.from,
-										to: r.from + accumulated.length,
-										text: accumulated,
-									};
-									activeEditor.setCursor(activeEditor.offsetToPos(r.from + accumulated.length));
-								}
-								: undefined,
 						},
 					);
 					await this.recordUsage(usage);
+					await this.guard.waitUntilIdle(signal);
 					const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 					const file = this.app.workspace.getActiveFile();
 					if (replaceTarget && (!view || !file)) {
@@ -557,81 +543,44 @@ export default class LatexVoicePlugin extends Plugin {
 					}
 					if (view && file) {
 						const editor = view.editor;
-						const streamed = streaming.range;
-						const partial = streamed &&
-							file.path === streamed.filePath &&
-							editor.getValue().slice(streamed.from, streamed.to) === streamed.text
-							? streamed
-							: null;
-						if (partial) {
-							editor.replaceRange(
-								output,
-								editor.offsetToPos(partial.from),
-								editor.offsetToPos(partial.to),
-							);
+						const text = dictationReplacementText(
+							output,
+							editor.getSelection(),
+							replaceTarget?.text,
+						);
+						if (replaceTarget) {
+							const range = verifiedDictationRange(editor.getValue(), replaceTarget);
+							if (file.path !== replaceTarget.filePath || !range) {
+								new Notice("La frase cambió durante la corrección; no la reemplacé.");
+								break;
+							}
+							const from = editor.offsetToPos(range.from);
+							const to = editor.offsetToPos(range.to);
+							editor.replaceRange(text, from, to);
 							this.setLastDictation({
 								filePath: file.path,
-								from: partial.from,
-								to: partial.from + output.length,
-								text: output,
+								from: range.from,
+								to: range.from + text.length,
+								text,
 							});
 							this.sessionRange = extendDictationRange(
-								this.sessionRange, file.path, partial.from, partial.from + output.length,
+								this.sessionRange, file.path, range.from, range.from + text.length,
 							);
-							editor.setCursor(editor.offsetToPos(partial.from + output.length));
+							editor.setCursor(editor.offsetToPos(range.from + text.length));
 						} else {
-							if (streamed) {
-								new Notice("Vibe LaTeX: inserté la conversión al final (el texto parcial cambió).");
-							}
-							const text = dictationReplacementText(
-								output,
-								editor.getSelection(),
-								replaceTarget?.text,
+							const cursor = editor.getCursor("to");
+							const start = editor.posToOffset(cursor);
+							editor.replaceRange(text, cursor, cursor);
+							this.setLastDictation({
+								filePath: file.path,
+								from: start,
+								to: start + text.length,
+								text,
+							});
+							this.sessionRange = extendDictationRange(
+								this.sessionRange, file.path, start, start + text.length,
 							);
-							if (replaceTarget) {
-								const range = verifiedDictationRange(editor.getValue(), replaceTarget);
-								if (file.path !== replaceTarget.filePath || !range) {
-									new Notice("La frase cambió durante la corrección; no la reemplacé.");
-									break;
-								}
-								const from = editor.offsetToPos(range.from);
-								const to = editor.offsetToPos(range.to);
-								editor.replaceRange(text, from, to);
-								this.setLastDictation({
-									filePath: file.path,
-									from: range.from,
-									to: range.from + text.length,
-									text,
-								});
-								this.sessionRange = extendDictationRange(
-									this.sessionRange, file.path, range.from, range.from + text.length,
-								);
-								editor.setCursor(editor.offsetToPos(range.from + text.length));
-							} else {
-								const from = editor.getCursor("from");
-								const to = editor.getCursor("to");
-								let start = editor.posToOffset(from);
-								if (start === editor.posToOffset(to)) {
-									const cut = trailingEllipsisLength(
-										editor.getValue().slice(Math.max(0, start - 30), start),
-									);
-									if (cut > 0) {
-										editor.replaceRange("", editor.offsetToPos(start - cut), from);
-										start -= cut;
-									}
-								}
-								editor.replaceRange(text, editor.offsetToPos(start), editor.offsetToPos(start));
-								this.setLastDictation({
-									filePath: file.path,
-									from: start,
-									to: start + text.length,
-									text,
-								});
-								this.sessionRange = extendDictationRange(
-									this.sessionRange, file.path, start, start + text.length,
-								);
-								editor.setCursor(editor.offsetToPos(start + text.length));
-							}
+							editor.setCursor(editor.offsetToPos(start + text.length));
 						}
 					}
 					if (this.settings.saveAudio) {

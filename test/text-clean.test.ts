@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
 	cleanPdfText,
+	dedentProse,
 	formatCommandOnly,
+	normalizeProseIndentation,
 	stitchFragment,
+	stripBracketedAnnotations,
 	stripLeadingEllipsis,
+	stripSoundAnnotations,
 	trailingEllipsisLength,
 } from "../src/text-clean";
 
@@ -13,6 +17,8 @@ describe("formatCommandOnly", () => {
 		expect(formatCommandOnly("Poneme un subtítulo.")).toBe("## ");
 		expect(formatCommandOnly("un título")).toBe("# ");
 		expect(formatCommandOnly("haceme una lista")).toBe("- ");
+	expect(formatCommandOnly("lista numerada")).toBe("1) ");
+	expect(formatCommandOnly("lista desordenada")).toBe("- ");
 		expect(formatCommandOnly("negrita")).toBe("**");
 		expect(formatCommandOnly("esto es una cita")).toBe("> ");
 	});
@@ -49,5 +55,60 @@ describe("cleanPdfText", () => {
 
 	it("keeps paragraph breaks", () => {
 		expect(cleanPdfText("uno\n\ndos")).toBe("uno\n\ndos");
+	});
+});
+
+describe("dedentProse", () => {
+	it("removes accidental indentation from prose", () => {
+		expect(dedentProse("   Hola mundo\n   segunda linea")).toBe("Hola mundo\nsegunda linea");
+	});
+
+	it("preserves lists", () => {
+		expect(dedentProse("    - item\n        - sub")).toBe("    - item\n        - sub");
+	});
+
+	it("preserves fenced code", () => {
+		const input = "    texto\n```\n    code\n```\n    mas";
+		expect(dedentProse(input)).toBe(input);
+	});
+
+	it("preserves math blocks", () => {
+		const input = "    texto\n$$\n    x^2\n$$\n    mas";
+		expect(dedentProse(input)).toBe(input);
+	});
+});
+
+describe("stripBracketedAnnotations", () => {
+	it("removes bracketed sound/music annotations", () => {
+		expect(stripBracketedAnnotations("Hola [music] mundo")).toBe("Hola mundo");
+		expect(stripBracketedAnnotations("Hi (music playing) bye")).toBe("Hi bye");
+		expect(stripBracketedAnnotations("A [Sound of rain] B")).toBe("A B");
+	});
+
+	it("supports spanish labels", () => {
+		expect(stripBracketedAnnotations("Hola [BAM] mundo")).toBe("Hola mundo");
+		expect(stripBracketedAnnotations("Hola [Música] mundo")).toBe("Hola mundo");
+		expect(stripBracketedAnnotations("Hola [Aplausos] mundo")).toBe("Hola mundo");
+		expect(stripBracketedAnnotations("Hola [Sonido de la venta] mundo")).toBe("Hola mundo");
+	});
+
+	it("keeps markdown links and ordinary brackets", () => {
+		expect(stripBracketedAnnotations("Ver [audio processing] texto")).toBe("Ver [audio processing] texto");
+		expect(stripBracketedAnnotations("Link [music](https://example.com) here")).toBe("Link [music](https://example.com) here");
+	});
+
+	it("keeps non-sound brackets", () => {
+		expect(stripBracketedAnnotations("Ver [1] y [nota]")).toBe("Ver [1] y [nota]");
+	});
+
+	it("preserves code and math", () => {
+		expect(stripBracketedAnnotations("`[music]` y $[music]$")).toBe("`[music]` y $[music]$");
+	});
+});
+
+describe("aliases", () => {
+	it("exposes preferred aliases", () => {
+		expect(normalizeProseIndentation).toBe(dedentProse);
+		expect(stripSoundAnnotations).toBe(stripBracketedAnnotations);
 	});
 });

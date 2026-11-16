@@ -13,6 +13,7 @@ vi.mock("obsidian", () => {
 			return null;
 		}
 		async saveData() {}
+		registerDomEvent() {}
 		addStatusBarItem() {
 			return { setText() {} };
 		}
@@ -75,6 +76,7 @@ import LatexVoicePlugin from "../src/main";
 describe("LatexVoicePlugin smoke", () => {
 	it("registers the dictation and correction commands on load", async () => {
 		const plugin = new LatexVoicePlugin({} as never, {} as never);
+		vi.stubGlobal("document", {});
 		await plugin.onload();
 		const ids = (plugin as unknown as { commands: { id: string }[] }).commands.map((c) => c.id);
 		expect(ids).toContain("toggle-dictation");

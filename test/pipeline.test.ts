@@ -291,8 +291,12 @@ describe("conversion speed", () => {
 		expect(needsConversion("integral de equis al cuadrado")).toBe(true);
 		expect(needsConversion("esto es un subtitulo")).toBe(true);
 		expect(needsConversion("son las 3 de la mañana")).toBe(true);
-		expect(needsConversion("primer paso barra barra segundo paso")).toBe(false);
-		expect(needsConversion("a // b")).toBe(true);
+	expect(needsConversion("primer paso barra barra segundo paso")).toBe(true);
+	expect(needsConversion("listas enumeradas")).toBe(true);
+	expect(needsConversion("listado")).toBe(true);
+	expect(needsConversion("quiero que esos valores los conviertas en un listado")).toBe(true);
+	expect(needsConversion("uno rojo dos verde tres azul")).toBe(true);
+	expect(needsConversion("a // b")).toBe(true);
 		expect(needsConversion("el criterio de estabilidad del sistema")).toBe(false);
 	});
 
