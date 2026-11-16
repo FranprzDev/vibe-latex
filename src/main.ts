@@ -18,6 +18,9 @@ import {
 } from "./dictation-range";
 import { AudioRecorder, audioExtension } from "./recorder";
 import { createProvider } from "./providers";
+import { LocalProvider } from "./providers/local";
+import FeedbackModal from "./feedback-modal";
+import { diagnoseFeedback, serializeFeedback, type FeedbackContext } from "./feedback";
 import { applyVoiceEdit, convertImageLocal, convertImageToLatex, convertPlainText, dictatePipeline } from "./pipeline";
 import { cleanPdfText } from "./text-clean";
 import { TypingGuard } from "./typing-guard";
@@ -43,6 +46,8 @@ export default class LatexVoicePlugin extends Plugin {
 	private sessionRange: { filePath: string; from: number; to: number } | null = null;
 	private pendingSave: Promise<void> = Promise.resolve();
 	private guard = new TypingGuard();
+	private lastFeedbackContext?: FeedbackContext;
+	private feedbackModal?: FeedbackModal;
 	async onload() {
 		await this.loadSettings();
 
@@ -143,6 +148,12 @@ export default class LatexVoicePlugin extends Plugin {
 			callback: () => void this.openLogsFolder(),
 		});
 
+		this.addCommand({
+			id: "report-problem",
+			name: "Reportar un problema (feedback local)",
+			callback: () => void this.openFeedbackReport(),
+		});
+
 		this.addSettingTab(new LatexVoiceSettingTab(this.app, this));
 
 		if (!this.settings.openaiApiKey && needsApiKey(this.settings) && !this.settings.devMode) {
@@ -156,6 +167,83 @@ export default class LatexVoicePlugin extends Plugin {
 	async showServerLogs(): Promise<void> {
 		const logs = await this.localManager.logsTail();
 		new ServerLogsModal(this.app, logs).open();
+	}
+
+	openFeedbackReport(): void {
+		if (this.sessionAbort || this.phraseAbort) {
+			new Notice("Terminá el dictado actual antes de reportar un problema.");
+			return;
+		}
+		this.feedbackModal?.close();
+		const modal = new FeedbackModal(this.app, {
+			version: this.manifest?.version ?? "0.0.0",
+			context: this.lastFeedbackContext,
+			diagnose: async (report, signal) => {
+				const ready = await this.localManager.ready();
+				if (!ready.llm) {
+					throw new Error("El servidor local no está disponible.");
+				}
+				const provider = new LocalProvider({
+					transcriptionBaseUrl: `http://127.0.0.1:${this.settings.sttPort}`,
+					conversionBaseUrl: `http://127.0.0.1:${this.settings.llmPort}/v1`,
+					transcriptionModel: "whisper-small",
+					conversionModel: "qwen3.5-9b",
+					apiKey: this.settings.localLlmApiKey,
+				});
+				return diagnoseFeedback(provider, report, signal);
+			},
+			dictate: async (signal) => {
+				if (this.sessionAbort || this.phraseAbort) {
+					throw new Error("Terminá el dictado actual antes de dictar el reporte.");
+				}
+				const ready = await this.localManager.ready();
+				if (!ready.stt) {
+					throw new Error("El servidor local no está disponible.");
+				}
+				const recorder = new AudioRecorder();
+				try {
+					const blob = await recorder.capturePhrase({
+						signal,
+						silenceMs: this.settings.silenceMs,
+						graceMs: this.settings.graceMs,
+					});
+					if (!blob || blob.size < 800) {
+						throw new Error("No detecté voz.");
+					}
+					const provider = new LocalProvider({
+						transcriptionBaseUrl: `http://127.0.0.1:${this.settings.sttPort}`,
+						conversionBaseUrl: `http://127.0.0.1:${this.settings.llmPort}/v1`,
+						transcriptionModel: "whisper-small",
+						conversionModel: "qwen3.5-9b",
+						apiKey: this.settings.localLlmApiKey,
+					});
+					const result = await provider.transcribe(
+						blob,
+						`phrase.${blob.type.includes("webm") ? "webm" : "m4a"}`,
+						{ language: "es", contextPrompt: this.settings.transcriptionContext, signal },
+					);
+					return result.text.trim();
+				} finally {
+					recorder.dispose();
+				}
+			},
+			save: async (report) => {
+				const folder = "Vibe LaTeX Feedback";
+				if (!(await this.app.vault.adapter.exists(folder))) {
+					await this.app.vault.createFolder(folder);
+				}
+				const path = `${folder}/${report.id}.json`;
+				await this.app.vault.create(path, serializeFeedback(report));
+				return path;
+			},
+		});
+		const originalOnClose = modal.onClose.bind(modal);
+		modal.onClose = () => {
+			originalOnClose();
+			this.feedbackModal = undefined;
+		};
+		this.feedbackModal = modal;
+		modal.open();
 	}
 
 	private async openLogsFolder(): Promise<void> {
@@ -292,6 +380,10 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private async correctByVoice(editor: Editor): Promise<void> {
+		if (this.feedbackModal) {
+			new Notice("Cerrá el reporte de feedback antes de corregir.");
+			return;
+		}
 		if (this.sessionAbort) {
 			this.sessionAbort.abort();
 			const deadline = Date.now() + 4_000;
@@ -463,6 +555,7 @@ export default class LatexVoicePlugin extends Plugin {
 	async onunload() {
 		this.sessionAbort?.abort();
 		this.recorder.dispose();
+		this.feedbackModal?.close();
 		await this.localManager?.stop().catch(() => undefined);
 	}
 
@@ -487,6 +580,10 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private async toggleDictation() {
+		if (this.feedbackModal) {
+			new Notice("Cerrá el reporte de feedback antes de dictar.");
+			return;
+		}
 		if (this.settings.devMode && this.settings.testAudioPath) {
 			await this.dictateFromFile(this.settings.testAudioPath);
 			return;
@@ -507,6 +604,10 @@ export default class LatexVoicePlugin extends Plugin {
 	}
 
 	private correctLastDictation() {
+		if (this.feedbackModal) {
+			new Notice("Cerrá el reporte de feedback antes de corregir.");
+			return;
+		}
 		if (this.sessionAbort) {
 			new Notice("Terminá el dictado actual antes de corregir.");
 			return;
@@ -616,7 +717,7 @@ export default class LatexVoicePlugin extends Plugin {
 
 				this.updateStatus("procesando...");
 				try {
-					const { output, usage, replacesContext } = await dictatePipeline(
+					const { transcript, output, usage, replacesContext } = await dictatePipeline(
 						provider,
 						blob,
 						`phrase.${blob.type.includes("webm") ? "webm" : "m4a"}`,
@@ -629,6 +730,7 @@ export default class LatexVoicePlugin extends Plugin {
 								this.updateStatus(step === "transcribing" ? "transcribiendo..." : "convirtiendo..."),
 						},
 					);
+					this.lastFeedbackContext = { transcript, output };
 					await this.recordUsage(usage);
 					await this.guard.waitUntilIdle(signal);
 					const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -717,12 +819,20 @@ export default class LatexVoicePlugin extends Plugin {
 						await this.saveAudioFile(blob);
 					}
 				} catch (e) {
+					if (!this.lastFeedbackContext) {
+						this.lastFeedbackContext = { transcript: "", output: "" };
+					}
+					this.lastFeedbackContext.error = "Error durante el dictado";
 					new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
 				}
 				if (replaceTarget) break;
 				if (!signal.aborted) this.updateStatus("escuchando...");
 			}
 		} catch (e) {
+			if (!this.lastFeedbackContext) {
+				this.lastFeedbackContext = { transcript: "", output: "" };
+			}
+			this.lastFeedbackContext.error = "Error durante el dictado";
 			new Notice(`Vibe LaTeX: ${friendlyError(e)}`);
 		} finally {
 			this.sessionAbort = null;
